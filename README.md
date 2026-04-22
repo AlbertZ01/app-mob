@@ -1,23 +1,49 @@
-# MoodMix Mobile
+# AUX Roast Mobile
 
-MoodMix is a small Android-ready mobile app starter that combines the OpenAI API and Spotify Web API.
+AUX Roast is an Android-ready Expo app for parties. A group of friends connects Spotify, the backend reads their music taste, OpenAI generates funny musical profiles and roasts, and the app builds a shared party session with live mood voting.
 
-The app asks for a mood, plan, or moment. The backend uses OpenAI to turn that into a focused music search idea, then uses Spotify catalog search to return matching tracks. API keys stay on the backend, not inside the Android app.
+## What The MVP Does
+
+- Create or join a party room with a short code.
+- Connect each friend's Spotify account through Authorization Code with PKCE.
+- Pull Spotify top artists and top tracks for each connected friend.
+- Estimate genres, favorite decades, repeat risk, party energy, chaos, and group compatibility.
+- Generate AI music profiles, roasts, badges, musical crimes, live DJ comments, and final party summary.
+- Build a shared playlist from the group's real Spotify tracks.
+- Let the room vote during live mode: more known, harder, more perreo, more elegant, lower energy, raise it now, surprise.
+- Save the generated playlist to a connected Spotify account.
+- Add demo friends so the app can be tested before configuring Spotify/OpenAI.
 
 ## Project Structure
 
 ```text
 mobile/   Expo React Native app
-server/   Node/Express API proxy for OpenAI and Spotify
-scripts/  Helper scripts for local setup assets
+server/   Node/Express API for Spotify OAuth, room state, OpenAI logic, and playlist saving
+scripts/  Helper scripts for app icons
 ```
+
+The MVP keeps room state in memory. For production, move room/member/session state to PostgreSQL or Supabase, token/session cache to Redis, and live voting to WebSockets.
 
 ## Prerequisites
 
 - Node.js LTS with npm
-- Expo account if you want to build an installable APK with EAS
+- Expo account for Android APK builds with EAS
 - OpenAI API key
-- Spotify developer app with Client ID and Client Secret
+- Spotify developer app
+
+## Spotify App Setup
+
+Create a Spotify app in the Spotify Developer Dashboard and add this redirect URI:
+
+```text
+http://localhost:8787/spotify/callback
+```
+
+For physical Android device testing, use your computer LAN IP in both Spotify dashboard and `server/.env`, for example:
+
+```text
+http://192.168.1.50:8787/spotify/callback
+```
 
 ## Configure Environment
 
@@ -33,7 +59,8 @@ Edit `server\.env`:
 OPENAI_API_KEY=your_openai_api_key
 OPENAI_MODEL=gpt-5.2
 SPOTIFY_CLIENT_ID=your_spotify_client_id
-SPOTIFY_CLIENT_SECRET=your_spotify_client_secret
+PUBLIC_BASE_URL=http://localhost:8787
+SPOTIFY_REDIRECT_URI=http://localhost:8787/spotify/callback
 PORT=8787
 ```
 
@@ -43,13 +70,13 @@ Create the mobile env file:
 Copy-Item mobile\.env.example mobile\.env
 ```
 
-For Android emulator, keep:
+For Android emulator:
 
 ```text
 EXPO_PUBLIC_API_BASE_URL=http://10.0.2.2:8787
 ```
 
-For a physical Android device, replace it with your computer LAN IP, for example:
+For physical Android device, replace it with your computer LAN IP:
 
 ```text
 EXPO_PUBLIC_API_BASE_URL=http://192.168.1.50:8787
@@ -76,7 +103,7 @@ Start the mobile app:
 npm run start --prefix mobile
 ```
 
-Then open it in Expo Go or run it on Android:
+Run on Android:
 
 ```powershell
 npm run android --prefix mobile
@@ -95,8 +122,21 @@ eas build -p android --profile preview
 
 When EAS finishes, it gives you a download link for the `.apk`.
 
+## Useful API Routes
+
+- `POST /rooms` creates a room.
+- `GET /rooms/:code` returns room state.
+- `GET /spotify/login?roomCode=ABC123&displayName=Name` returns the Spotify OAuth URL.
+- `POST /rooms/:code/demo-friend` adds a fake friend for testing.
+- `POST /rooms/:code/analyze` runs the AI party analysis.
+- `POST /rooms/:code/live/vote` records a live mood vote and generates commentary.
+- `POST /rooms/:code/summary` creates the final report.
+- `POST /rooms/:code/playlist/save` saves the session to Spotify.
+
 ## API Notes
 
-- OpenAI is called with the official JavaScript SDK and the Responses API.
-- Spotify uses Client Credentials on the backend, which is appropriate for public catalog search.
-- Spotify user-specific features such as creating playlists require Authorization Code with PKCE or a secure authorization-code backend flow; this starter intentionally avoids user account access.
+- OpenAI stays server-side. The app never receives `OPENAI_API_KEY`.
+- Spotify uses Authorization Code with PKCE. The app never stores a Spotify client secret.
+- Spotify scopes used: `user-read-private`, `user-top-read`, `playlist-modify-private`, `playlist-modify-public`.
+- Demo mode works without Spotify/OpenAI credentials, but real roasts and real playlist saving require credentials.
+

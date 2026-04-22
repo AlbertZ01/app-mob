@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "MoodMix",
+    "name": "AUX Roast",
     "slug": "app-mob",
     "version": "0.1.0",
     "orientation": "portrait",
@@ -14,13 +14,13 @@
       "package": "com.albertz01.appmob",
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
-        "backgroundColor": "#101820"
+        "backgroundColor": "#0D1321"
       }
     },
     "splash": {
       "image": "./assets/splash.png",
       "resizeMode": "contain",
-      "backgroundColor": "#101820"
+      "backgroundColor": "#0D1321"
     }
   }
 }
