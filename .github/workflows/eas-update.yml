@@ -12,9 +12,6 @@ on:
 jobs:
   publish-production-update:
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: mobile
     env:
       EXPO_PUBLIC_API_BASE_URL: https://api.a-zak.com
       EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY: ${{ vars.EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY || secrets.EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY }}
@@ -52,8 +49,10 @@ jobs:
 
       - name: Install dependencies
         if: steps.expo-token.outputs.present == 'true'
+        working-directory: mobile
         run: npm ci
 
       - name: Publish production update
         if: steps.expo-token.outputs.present == 'true'
+        working-directory: mobile
         run: npx eas-cli@latest update --channel production --message "main ${GITHUB_SHA}" --non-interactive
