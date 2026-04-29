@@ -18,19 +18,15 @@ type Provider = "apple" | "google";
 export function AuthScreen({
   busy,
   canUseAuth,
-  buildReleaseId,
   onSignIn,
   onSignUp,
   onSocial,
-  supabaseProjectHost,
 }: {
   busy: string;
   canUseAuth: boolean;
-  buildReleaseId: string;
   onSignIn: (email: string, password: string) => Promise<void>;
   onSignUp: (email: string, password: string) => Promise<void>;
   onSocial: (provider: Provider) => Promise<void>;
-  supabaseProjectHost: string | null;
 }) {
   const [email, setEmail] = useState("");
   const [feedback, setFeedback] = useState("");
@@ -94,9 +90,7 @@ export function AuthScreen({
       <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
         <View style={styles.card}>
           <Text style={styles.cardTitle}>Inicia sesion</Text>
-          <Text style={styles.metaText}>
-            Build {buildReleaseId} | {supabaseProjectHost || "Supabase sin configurar"}
-          </Text>
+          <Text style={styles.metaText}>Entra para crear sala, conectar Spotify y arrancar la fiesta.</Text>
           <TextInput
             autoCapitalize="none"
             autoComplete="email"
@@ -158,21 +152,6 @@ export function AuthScreen({
               variant="dark"
             />
           ) : null}
-        </View>
-
-        <View style={styles.noteCard}>
-          <Text style={styles.noteTitle}>Diagnostico de login</Text>
-          <Text style={styles.noteText}>
-            Estado de auth: {canUseAuth ? "Supabase conectado" : "faltan variables en la build"}.
-          </Text>
-          <Text style={styles.noteText}>
-            Redirect esperado: `appmob://auth/callback`.
-          </Text>
-          <Text style={styles.noteText}>
-            Si creas cuenta y no entra al momento, desactiva `Email Confirmations` en la seccion
-            `Authentication / Settings` de Supabase o confirma el correo antes de volver a iniciar
-            sesion.
-          </Text>
         </View>
       </ScrollView>
     </SafeAreaView>
@@ -277,8 +256,8 @@ const styles = StyleSheet.create({
   },
   metaText: {
     color: "#596663",
-    fontSize: 12,
-    fontWeight: "800",
+    fontSize: 13,
+    lineHeight: 18,
     marginBottom: 12,
   },
   input: {
@@ -354,23 +333,5 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: "800",
     textTransform: "uppercase",
-  },
-  noteCard: {
-    backgroundColor: "#13213A",
-    borderRadius: 8,
-    marginTop: 14,
-    padding: 16,
-  },
-  noteTitle: {
-    color: "#FFFFFF",
-    fontSize: 16,
-    fontWeight: "900",
-    marginBottom: 8,
-  },
-  noteText: {
-    color: "#D8E3E0",
-    fontSize: 13,
-    lineHeight: 20,
-    marginBottom: 8,
   },
 });

@@ -17,6 +17,7 @@ import {
   Pressable,
   SafeAreaView,
   ScrollView,
+  Share,
   StyleSheet,
   Text,
   TextInput,
@@ -25,7 +26,6 @@ import {
 import { SafeAreaProvider, useSafeAreaInsets } from "react-native-safe-area-context";
 
 import {
-  addDemoFriend,
   createRoom,
   finishParty,
   generateSession,
@@ -36,11 +36,9 @@ import {
 } from "./src/services/api";
 import { AuthScreen } from "./src/components/AuthScreen";
 import {
-  appReleaseId,
   authRedirectUrl,
   hasSupabaseConfig,
   supabase,
-  supabaseProjectHost,
 } from "./src/lib/supabase";
 import type { PartyMember, PartyMode, PartyRoom, Track } from "./src/types/party";
 
@@ -376,12 +374,10 @@ export default function App() {
       <SafeAreaProvider>
         <AuthScreen
           busy={authBusy}
-          buildReleaseId={appReleaseId}
           canUseAuth={hasSupabaseConfig}
           onSignIn={handleEmailSignIn}
           onSignUp={handleEmailSignUp}
           onSocial={handleSocialSignIn}
-          supabaseProjectHost={supabaseProjectHost}
         />
       </SafeAreaProvider>
     );
@@ -391,14 +387,12 @@ export default function App() {
     <SafeAreaProvider>
       <PartyExperience
         authenticatedUser={sessionToUser(session)}
-        buildReleaseId={appReleaseId}
         isUpdateAvailable={isUpdateAvailable}
         lastUpdateCheckAt={lastUpdateCheckAt}
         onCheckUpdates={checkForUpdates}
         onSignOut={handleSignOut}
         onUpdatePress={handleApplyUpdate}
         signingOut={authBusy === "signout"}
-        supabaseProjectHost={supabaseProjectHost}
         updateError={updateError}
         updateState={updateState}
       />
@@ -408,26 +402,22 @@ export default function App() {
 
 function PartyExperience({
   authenticatedUser,
-  buildReleaseId,
   isUpdateAvailable,
   lastUpdateCheckAt,
   onCheckUpdates,
   onSignOut,
   onUpdatePress,
   signingOut,
-  supabaseProjectHost,
   updateError,
   updateState,
 }: {
   authenticatedUser: AuthenticatedUser;
-  buildReleaseId: string;
   isUpdateAvailable: boolean;
   lastUpdateCheckAt: string;
   onCheckUpdates: () => Promise<void>;
   onSignOut: () => Promise<void>;
   onUpdatePress: () => Promise<void>;
   signingOut: boolean;
-  supabaseProjectHost: string | null;
   updateError: string;
   updateState: UpdateState;
 }) {
@@ -523,15 +513,14 @@ function PartyExperience({
     });
   }
 
-  async function handleDemoFriend() {
+  async function handleInviteFriend() {
     if (!room) {
       return;
     }
 
-    await run("Sumando amigo demo", async () => {
-      const nextRoom = await addDemoFriend(room.code, displayName);
-      setRoom(nextRoom);
-      setActiveTab("perfiles");
+    await Share.share({
+      message: `Unete a mi sala ${room.code} en kazp. Entra en la app, inicia sesion y usa este codigo para conectar tu Spotify: ${room.code}`,
+      title: `Invitacion a la sala ${room.code}`,
     });
   }
 
@@ -626,7 +615,9 @@ function PartyExperience({
           </View>
           <View style={styles.authSessionRow}>
             <Text numberOfLines={1} style={styles.authSessionText}>
-              {authenticatedUser.email}
+              {room
+                ? `${room.members.length} personas conectadas en esta sala`
+                : "Prepara una sala y comparte el codigo con tu grupo"}
             </Text>
             <Pressable onPress={() => void onSignOut()} style={styles.signOutButton}>
               {signingOut ? (
@@ -657,13 +648,11 @@ function PartyExperience({
                 <RoomScreen
                   busyLabel={busyLabel}
                   canUsePartyTools={canUsePartyTools}
-                  displayName={displayName}
-                  onAddDemoFriend={handleDemoFriend}
                   onConnectSpotify={handleConnectSpotify}
                   onGenerateSession={handleGenerateSession}
+                  onInviteFriend={handleInviteFriend}
                   onRefresh={handleRefreshRoom}
                   room={room}
-                  setDisplayName={setDisplayName}
                 />
               ) : null}
               {activeTab === "perfiles" ? <ProfilesScreen members={room.members} /> : null}
@@ -689,7 +678,6 @@ function PartyExperience({
               {activeTab === "perfil" ? (
                 <ProfileScreen
                   authenticatedUser={authenticatedUser}
-                  buildReleaseId={buildReleaseId}
                   currentMember={currentMember}
                   isUpdateAvailable={isUpdateAvailable}
                   lastUpdateCheckAt={lastUpdateCheckAt}
@@ -697,7 +685,6 @@ function PartyExperience({
                   onConnectSpotify={handleConnectSpotify}
                   onUpdatePress={onUpdatePress}
                   room={room}
-                  supabaseProjectHost={supabaseProjectHost}
                   updateError={updateError}
                   updateState={updateState}
                 />
@@ -822,23 +809,19 @@ function HomeScreen({
 function RoomScreen({
   busyLabel,
   canUsePartyTools,
-  displayName,
-  onAddDemoFriend,
   onConnectSpotify,
   onGenerateSession,
+  onInviteFriend,
   onRefresh,
   room,
-  setDisplayName,
 }: {
   busyLabel: string;
   canUsePartyTools: boolean;
-  displayName: string;
-  onAddDemoFriend: () => void;
   onConnectSpotify: () => void;
   onGenerateSession: () => void;
+  onInviteFriend: () => void;
   onRefresh: () => void;
   room: PartyRoom;
-  setDisplayName: (value: string) => void;
 }) {
   return (
     <>
@@ -849,18 +832,31 @@ function RoomScreen({
       </View>
 
       <View style={styles.panel}>
-        <Text style={styles.panelTitle}>Conectar Spotify</Text>
+        <Text style={styles.panelTitle}>Anadir amigos</Text>
         <Text style={styles.bodyText}>
-          Cada amigo conecta su cuenta. El backend lee top artistas, canciones y generos; las claves
-          nunca van en la app.
+          Comparte el codigo de la sala y haz que cada persona conecte su Spotify desde su movil.
         </Text>
-        <TextInput
-          onChangeText={setDisplayName}
-          placeholder="Nombre para la sala"
-          placeholderTextColor="#7A8582"
-          style={styles.input}
-          value={displayName}
-        />
+        <View style={styles.inviteCodeCard}>
+          <Text selectable style={styles.inviteCodeText}>
+            {room.code}
+          </Text>
+          <Text style={styles.inviteCodeHint}>Usa este codigo para entrar en la sala</Text>
+        </View>
+        <View style={styles.actionRow}>
+          <AppButton
+            icon="share-social"
+            label="Invitar"
+            onPress={onInviteFriend}
+          />
+          <AppButton icon="refresh" label="Refrescar" onPress={onRefresh} variant="ghost" />
+        </View>
+      </View>
+
+      <View style={styles.panel}>
+        <Text style={styles.panelTitle}>Conecta tu Spotify</Text>
+        <Text style={styles.bodyText}>
+          Usa tu propia cuenta para que kazp pueda leer artistas, temas y guardar la playlist final.
+        </Text>
         <View style={styles.actionRow}>
           <AppButton
             icon="musical-notes"
@@ -868,15 +864,8 @@ function RoomScreen({
             loading={busyLabel === "Abriendo Spotify"}
             onPress={onConnectSpotify}
           />
-          <AppButton icon="refresh" label="Refrescar" onPress={onRefresh} variant="dark" />
+          <AppButton icon="refresh" label="Verificar" onPress={onRefresh} variant="dark" />
         </View>
-        <AppButton
-          icon="sparkles"
-          label="Anadir amigo demo"
-          loading={busyLabel === "Sumando amigo demo"}
-          onPress={onAddDemoFriend}
-          variant="ghost"
-        />
       </View>
 
       <View style={styles.panel}>
@@ -884,7 +873,7 @@ function RoomScreen({
         {room.members.length === 0 ? (
           <EmptyState
             icon="people-outline"
-            text="Conecta Spotify o suma amigos demo para ver roasts, compatibilidad y playlist."
+            text="Comparte la sala y conecta cuentas reales para ver roasts, compatibilidad y playlist."
             title="La sala aun esta vacia"
           />
         ) : (
@@ -1074,7 +1063,6 @@ function SummaryScreen({
 
 function ProfileScreen({
   authenticatedUser,
-  buildReleaseId,
   currentMember,
   isUpdateAvailable,
   lastUpdateCheckAt,
@@ -1082,12 +1070,10 @@ function ProfileScreen({
   onConnectSpotify,
   onUpdatePress,
   room,
-  supabaseProjectHost,
   updateError,
   updateState,
 }: {
   authenticatedUser: AuthenticatedUser;
-  buildReleaseId: string;
   currentMember: PartyMember | null;
   isUpdateAvailable: boolean;
   lastUpdateCheckAt: string;
@@ -1095,7 +1081,6 @@ function ProfileScreen({
   onConnectSpotify: () => Promise<void>;
   onUpdatePress: () => Promise<void>;
   room: PartyRoom;
-  supabaseProjectHost: string | null;
   updateError: string;
   updateState: UpdateState;
 }) {
@@ -1121,7 +1106,9 @@ function ProfileScreen({
               {authenticatedUser.email}
             </Text>
             <Text style={styles.profileHeroMeta}>
-              Build {buildReleaseId} | {supabaseProjectHost || "Supabase no configurado"}
+              {currentMember
+                ? `${currentMember.profile.archetype} | ${currentMember.stats.decadeBias}`
+                : "Conecta tu cuenta de Spotify para completar tu perfil"}
             </Text>
           </View>
         </View>
@@ -1358,7 +1345,11 @@ function TabBar({ activeTab, onChange }: { activeTab: TabKey; onChange: (tab: Ta
   return (
     <View style={styles.tabBar}>
       {TABS.map((tab) => (
-        <Pressable key={tab.id} onPress={() => onChange(tab.id)} style={styles.tabButton}>
+        <Pressable
+          key={tab.id}
+          onPress={() => onChange(tab.id)}
+          style={[styles.tabButton, activeTab === tab.id && styles.tabButtonActive]}
+        >
           <Ionicons color={activeTab === tab.id ? "#EE4266" : "#596663"} name={tab.icon} size={20} />
           <Text style={[styles.tabText, activeTab === tab.id && styles.tabTextActive]}>{tab.label}</Text>
         </Pressable>
@@ -1641,8 +1632,9 @@ const styles = StyleSheet.create({
     borderBottomColor: "#E3DED0",
     borderBottomWidth: 1,
     flexDirection: "row",
+    gap: 6,
     justifyContent: "space-around",
-    paddingHorizontal: 6,
+    paddingHorizontal: 8,
     paddingVertical: 8,
   },
   updateBanner: {
@@ -1692,9 +1684,15 @@ const styles = StyleSheet.create({
   },
   tabButton: {
     alignItems: "center",
+    borderRadius: 999,
     flex: 1,
     gap: 3,
+    justifyContent: "center",
     minWidth: 52,
+    paddingVertical: 8,
+  },
+  tabButtonActive: {
+    backgroundColor: "#FDEFD0",
   },
   tabText: {
     color: "#596663",
@@ -1727,6 +1725,29 @@ const styles = StyleSheet.create({
     fontSize: 14,
     lineHeight: 20,
     marginBottom: 12,
+  },
+  inviteCodeCard: {
+    alignItems: "center",
+    backgroundColor: "#F8F4E3",
+    borderColor: "#E3DED0",
+    borderRadius: 8,
+    borderWidth: 1,
+    marginBottom: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 14,
+  },
+  inviteCodeText: {
+    color: "#0D1321",
+    fontSize: 28,
+    fontVariant: ["tabular-nums"],
+    fontWeight: "900",
+    letterSpacing: 0,
+  },
+  inviteCodeHint: {
+    color: "#6C7774",
+    fontSize: 12,
+    fontWeight: "700",
+    marginTop: 6,
   },
   helperText: {
     color: "#6C7774",
