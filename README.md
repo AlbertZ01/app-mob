@@ -158,13 +158,50 @@ cd mobile
 npm run build:android:local-debug
 ```
 
-That produces a debug APK locally after `expo prebuild`.
+That produces a debug APK locally after `expo prebuild`. It is for local development against Metro, not for distribution to other devices.
 
-### 2. GitHub Actions debug APK
+### 2. GitHub Actions release APK
 
-This repo includes a GitHub Actions workflow that builds a debug APK and uploads it as an artifact, usually faster than waiting in EAS free queue.
+This repo includes a GitHub Actions workflow that builds a release APK and uploads it as an artifact, usually faster than waiting in EAS free queue.
 
-Open the repository's Actions tab and run **Android Debug APK** manually.
+Open the repository's Actions tab and run **Android Release APK** manually.
+
+Set these GitHub repository variables first so the login screen is usable in the generated APK:
+
+```text
+EXPO_PUBLIC_SUPABASE_URL
+EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY
+```
+
+The workflow already defaults the backend URL to:
+
+```text
+https://api.a-zak.com
+```
+
+## Raspberry Pi Hosting
+
+The mobile app is installed on the phone, but the backend API can be hosted on your Raspberry Pi with Nginx and Cloudflare.
+
+Deployment templates live in:
+
+```text
+server/deploy/
+```
+
+Files included:
+
+- `server/deploy/api.a-zak.com.nginx.conf`
+- `server/deploy/aux-roast.service.example`
+- `server/deploy/raspberry-pi.md`
+
+Production backend values should look like this:
+
+```text
+PUBLIC_BASE_URL=https://api.a-zak.com
+SPOTIFY_REDIRECT_URI=https://api.a-zak.com/spotify/callback
+PORT=8787
+```
 
 ## iOS Builds
 

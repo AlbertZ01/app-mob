@@ -1,0 +1,16 @@
+[Unit]
+Description=AUX Roast API
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=APP_USER
+WorkingDirectory=/opt/aux-roast/server
+Environment=NODE_ENV=production
+ExecStart=/usr/bin/npm run start
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

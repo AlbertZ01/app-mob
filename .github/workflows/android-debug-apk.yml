@@ -1,4 +1,4 @@
-name: Android Debug APK
+name: Android Release APK
 
 on:
   workflow_dispatch:
@@ -10,11 +10,15 @@ on:
       - ".github/workflows/android-debug-apk.yml"
 
 jobs:
-  build-debug-apk:
+  build-release-apk:
     runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: mobile
+    env:
+      EXPO_PUBLIC_API_BASE_URL: https://api.a-zak.com
+      EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY: ${{ vars.EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY }}
+      EXPO_PUBLIC_SUPABASE_URL: ${{ vars.EXPO_PUBLIC_SUPABASE_URL }}
 
     steps:
       - name: Checkout
@@ -45,14 +49,20 @@ jobs:
       - name: Generate native Android project
         run: npx expo prebuild --platform android --clean --non-interactive
 
-      - name: Build debug APK
+      - name: Check release env
+        run: |
+          if [ -z "$EXPO_PUBLIC_SUPABASE_URL" ] || [ -z "$EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY" ]; then
+            echo "::warning::Supabase build vars are missing. The APK will install, but login will stay blocked until you set EXPO_PUBLIC_SUPABASE_URL and EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY as repository variables."
+          fi
+
+      - name: Build release APK
         run: |
           cd android
           chmod +x gradlew
-          ./gradlew assembleDebug
+          ./gradlew assembleRelease
 
-      - name: Upload debug APK artifact
+      - name: Upload release APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: aux-roast-debug-apk
-          path: mobile/android/app/build/outputs/apk/debug/app-debug.apk
+          name: aux-roast-release-apk
+          path: mobile/android/app/build/outputs/apk/release/app-release.apk
