@@ -17,8 +17,8 @@ jobs:
         working-directory: mobile
     env:
       EXPO_PUBLIC_API_BASE_URL: https://api.a-zak.com
-      EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY: ${{ vars.EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY }}
-      EXPO_PUBLIC_SUPABASE_URL: ${{ vars.EXPO_PUBLIC_SUPABASE_URL }}
+      EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY: ${{ vars.EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY || secrets.EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY }}
+      EXPO_PUBLIC_SUPABASE_URL: ${{ vars.EXPO_PUBLIC_SUPABASE_URL || secrets.EXPO_PUBLIC_SUPABASE_URL }}
 
     steps:
       - name: Checkout
@@ -52,7 +52,8 @@ jobs:
       - name: Check release env
         run: |
           if [ -z "$EXPO_PUBLIC_SUPABASE_URL" ] || [ -z "$EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY" ]; then
-            echo "::warning::Supabase build vars are missing. The APK will install, but login will stay blocked until you set EXPO_PUBLIC_SUPABASE_URL and EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY as repository variables."
+            echo "::error::Supabase build values are missing. Set EXPO_PUBLIC_SUPABASE_URL and EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY as repository variables or secrets before building."
+            exit 1
           fi
 
       - name: Build release APK
