@@ -9,6 +9,7 @@
     "orientation": "portrait",
     "description": "kazp analyzes the group's Spotify taste, signs users in and keeps the party session updated live.",
     "icon": "./assets/icon.png",
+    "newArchEnabled": false,
     "userInterfaceStyle": "light",
     "scheme": "appmob",
     "updates": {

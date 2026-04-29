@@ -51,6 +51,36 @@ jobs:
       - name: Generate native Android project
         run: npx expo prebuild --platform android --clean --non-interactive
 
+      - name: Tune Gradle for CI
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path("android/gradle.properties")
+          text = path.read_text()
+          replacements = {
+              "org.gradle.jvmargs=-Xmx2048m -XX:MaxMetaspaceSize=512m": "org.gradle.jvmargs=-Xmx4096m -XX:MaxMetaspaceSize=1536m -Dfile.encoding=UTF-8",
+              "org.gradle.parallel=true": "org.gradle.parallel=false",
+              "reactNativeArchitectures=armeabi-v7a,arm64-v8a,x86,x86_64": "reactNativeArchitectures=armeabi-v7a,arm64-v8a",
+              "newArchEnabled=true": "newArchEnabled=false",
+          }
+
+          for before, after in replacements.items():
+              text = text.replace(before, after)
+
+          extras = [
+              "org.gradle.workers.max=1",
+              "kotlin.daemon.jvm.options=-Xmx1536m",
+          ]
+
+          for line in extras:
+              if line not in text:
+                  text += f"\\n{line}"
+
+          path.write_text(text)
+          print(path.read_text())
+          PY
+
       - name: Check release env
         run: |
           if [ -z "$EXPO_PUBLIC_SUPABASE_URL" ] || [ -z "$EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY" ]; then
@@ -62,7 +92,7 @@ jobs:
         run: |
           cd android
           chmod +x gradlew
-          ./gradlew assembleRelease
+          ./gradlew assembleRelease --no-daemon --max-workers=1
 
       - name: Upload release APK artifact
         uses: actions/upload-artifact@v4
