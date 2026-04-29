@@ -40,6 +40,7 @@ export type MusicProfile = {
 
 export type PartyMember = {
   id: string;
+  appUserId?: string;
   displayName: string;
   avatarUrl: string;
   spotifyUrl: string;

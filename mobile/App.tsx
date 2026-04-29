@@ -46,6 +46,7 @@ type IconName = ComponentProps<typeof Ionicons>["name"];
 type TabKey = "sala" | "perfiles" | "sesion" | "live" | "resumen" | "perfil";
 type AuthProvider = "apple" | "google";
 type AuthenticatedUser = {
+  id: string;
   displayName: string;
   email: string;
 };
@@ -66,11 +67,11 @@ const MODES: { id: PartyMode; label: string }[] = [
 
 const TABS: { id: TabKey; label: string; icon: IconName }[] = [
   { id: "sala", label: "Sala", icon: "people" },
-  { id: "perfiles", label: "Roasts", icon: "flame" },
+  { id: "perfiles", label: "Grupo", icon: "flame" },
   { id: "sesion", label: "Sesion", icon: "radio" },
   { id: "live", label: "Live", icon: "pulse" },
   { id: "resumen", label: "Final", icon: "trophy" },
-  { id: "perfil", label: "Perfil", icon: "person-circle" },
+  { id: "perfil", label: "Yo", icon: "person-circle" },
 ];
 
 const LIVE_VOTES = [
@@ -113,7 +114,6 @@ export default function App() {
   const [authBusy, setAuthBusy] = useState("");
   const [authReady, setAuthReady] = useState(false);
   const [isUpdateAvailable, setIsUpdateAvailable] = useState(false);
-  const [lastUpdateCheckAt, setLastUpdateCheckAt] = useState("");
   const [session, setSession] = useState<Session | null>(null);
   const [updateError, setUpdateError] = useState("");
   const [updateState, setUpdateState] = useState<UpdateState>("idle");
@@ -196,11 +196,9 @@ export default function App() {
       setUpdateError("");
       const update = await Updates.checkForUpdateAsync();
 
-      setLastUpdateCheckAt(new Date().toISOString());
       setIsUpdateAvailable(update.isAvailable);
       setUpdateState(update.isAvailable ? "ready" : "idle");
     } catch (error) {
-      setLastUpdateCheckAt(new Date().toISOString());
       setIsUpdateAvailable(false);
       setUpdateState("idle");
       setUpdateError(error instanceof Error ? error.message : "No se pudo buscar una actualizacion.");
@@ -388,7 +386,6 @@ export default function App() {
       <PartyExperience
         authenticatedUser={sessionToUser(session)}
         isUpdateAvailable={isUpdateAvailable}
-        lastUpdateCheckAt={lastUpdateCheckAt}
         onCheckUpdates={checkForUpdates}
         onSignOut={handleSignOut}
         onUpdatePress={handleApplyUpdate}
@@ -403,7 +400,6 @@ export default function App() {
 function PartyExperience({
   authenticatedUser,
   isUpdateAvailable,
-  lastUpdateCheckAt,
   onCheckUpdates,
   onSignOut,
   onUpdatePress,
@@ -413,7 +409,6 @@ function PartyExperience({
 }: {
   authenticatedUser: AuthenticatedUser;
   isUpdateAvailable: boolean;
-  lastUpdateCheckAt: string;
   onCheckUpdates: () => Promise<void>;
   onSignOut: () => Promise<void>;
   onUpdatePress: () => Promise<void>;
@@ -431,9 +426,7 @@ function PartyExperience({
 
   const memberCount = room?.members.length || 0;
   const canUsePartyTools = memberCount > 0 && !busyLabel;
-  const currentMember = room
-    ? findMatchingMember(room.members, authenticatedUser.displayName, authenticatedUser.email)
-    : null;
+  const currentMember = room ? findMatchingMember(room.members, authenticatedUser) : null;
 
   useEffect(() => {
     setDisplayName(authenticatedUser.displayName);
@@ -494,7 +487,7 @@ function PartyExperience({
     }
 
     await run("Abriendo Spotify", async () => {
-      const login = await getSpotifyLoginUrl(room.code, displayName);
+      const login = await getSpotifyLoginUrl(room.code, displayName, authenticatedUser.id);
       await NativeLinking.openURL(login.url);
       Alert.alert(
         "Spotify abierto",
@@ -565,8 +558,16 @@ function PartyExperience({
       return;
     }
 
+    if (!currentMember) {
+      Alert.alert(
+        "Conecta tu Spotify",
+        "La playlist se guarda en tu propia cuenta. Primero conecta Spotify con esta misma sesion.",
+      );
+      return;
+    }
+
     await run("Guardando playlist", async () => {
-      const saved = await savePlaylist(room.code);
+      const saved = await savePlaylist(room.code, currentMember.id);
       const nextRoom = await getRoom(room.code);
       setRoom(nextRoom);
       Alert.alert(
@@ -594,7 +595,7 @@ function PartyExperience({
             <Image source={require("./assets/icon.png")} style={styles.logo} />
             <View style={styles.brandCopy}>
               <Text style={styles.appName}>kazp</Text>
-              <Text style={styles.caption}>group music control</Text>
+              <Text style={styles.caption}>control musical para tu grupo</Text>
             </View>
             {room ? <CodeBadge code={room.code} /> : null}
           </View>
@@ -648,6 +649,7 @@ function PartyExperience({
                 <RoomScreen
                   busyLabel={busyLabel}
                   canUsePartyTools={canUsePartyTools}
+                  currentMember={currentMember}
                   onConnectSpotify={handleConnectSpotify}
                   onGenerateSession={handleGenerateSession}
                   onInviteFriend={handleInviteFriend}
@@ -659,9 +661,11 @@ function PartyExperience({
               {activeTab === "sesion" ? (
                 <SessionScreen
                   canUsePartyTools={canUsePartyTools}
+                  currentMember={currentMember}
                   onGenerateSession={handleGenerateSession}
                   onSavePlaylist={handleSavePlaylist}
                   playlist={room.playlist}
+                  roomCode={room.code}
                 />
               ) : null}
               {activeTab === "live" ? (
@@ -680,7 +684,6 @@ function PartyExperience({
                   authenticatedUser={authenticatedUser}
                   currentMember={currentMember}
                   isUpdateAvailable={isUpdateAvailable}
-                  lastUpdateCheckAt={lastUpdateCheckAt}
                   onCheckUpdates={onCheckUpdates}
                   onConnectSpotify={handleConnectSpotify}
                   onUpdatePress={onUpdatePress}
@@ -694,6 +697,7 @@ function PartyExperience({
         ) : (
           <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
             <HomeScreen
+              authenticatedUser={authenticatedUser}
               busyLabel={busyLabel}
               displayName={displayName}
               joinCode={joinCode}
@@ -717,12 +721,20 @@ function sessionToUser(session: Session): AuthenticatedUser {
     "party friend";
 
   return {
+    id: session.user.id,
     displayName,
     email: session.user.email || "usuario sin correo",
   };
 }
 
-function findMatchingMember(members: PartyMember[], displayName: string, email: string) {
+function findMatchingMember(members: PartyMember[], authenticatedUser: AuthenticatedUser) {
+  const exactMatch = members.find((member) => member.appUserId === authenticatedUser.id);
+
+  if (exactMatch) {
+    return exactMatch;
+  }
+
+  const { displayName, email } = authenticatedUser;
   const normalizedDisplayName = normalizeIdentity(displayName);
   const normalizedEmailAlias = normalizeIdentity(email.split("@")[0] || "");
 
@@ -758,6 +770,7 @@ function initialsFor(name: string) {
 }
 
 function HomeScreen({
+  authenticatedUser,
   busyLabel,
   displayName,
   joinCode,
@@ -766,6 +779,7 @@ function HomeScreen({
   setDisplayName,
   setJoinCode,
 }: {
+  authenticatedUser: AuthenticatedUser;
   busyLabel: string;
   displayName: string;
   joinCode: string;
@@ -776,20 +790,48 @@ function HomeScreen({
 }) {
   return (
     <>
+      <LinearGradient colors={["#10211E", "#1D7874"]} style={styles.homeHero}>
+        <Text style={styles.homeEyebrow}>Tu grupo, una sola sala</Text>
+        <Text style={styles.homeHeroTitle}>
+          Crea la previa, comparte el codigo y deja que kazp ordene el caos musical.
+        </Text>
+        <View style={styles.homeHeroPillRow}>
+          <View style={styles.homeHeroPill}>
+            <Ionicons color="#D9B44A" name="person-circle-outline" size={14} />
+            <Text style={styles.homeHeroPillText}>{authenticatedUser.displayName}</Text>
+          </View>
+          <View style={styles.homeHeroPill}>
+            <Ionicons color="#D9B44A" name="share-social-outline" size={14} />
+            <Text style={styles.homeHeroPillText}>Invita y conecta Spotify</Text>
+          </View>
+        </View>
+      </LinearGradient>
+
       <View style={styles.panel}>
         <Text style={styles.panelTitle}>Crear fiesta</Text>
+        <Text style={styles.bodyText}>
+          El nombre se usa dentro de la sala para identificarte cuando conectes Spotify.
+        </Text>
         <TextInput
           onChangeText={setDisplayName}
-          placeholder="Tu nombre"
+          placeholder="Tu alias en la sala"
           placeholderTextColor="#7A8582"
           style={styles.input}
           value={displayName}
         />
-        <AppButton icon="add-circle" label="Crear sala" loading={busyLabel === "Creando sala"} onPress={onCreateRoom} />
+        <AppButton
+          icon="add-circle"
+          label="Crear sala"
+          loading={busyLabel === "Creando sala"}
+          onPress={onCreateRoom}
+        />
       </View>
 
       <View style={styles.panel}>
         <Text style={styles.panelTitle}>Unirse con codigo</Text>
+        <Text style={styles.bodyText}>
+          Si un amigo ya ha creado la sala, entra con su codigo y conecta tu cuenta.
+        </Text>
         <TextInput
           autoCapitalize="characters"
           onChangeText={setJoinCode}
@@ -798,7 +840,34 @@ function HomeScreen({
           style={styles.input}
           value={joinCode}
         />
-        <AppButton icon="enter" label="Entrar" loading={busyLabel === "Entrando"} onPress={onJoinRoom} variant="dark" />
+        <AppButton
+          icon="enter"
+          label="Entrar"
+          loading={busyLabel === "Entrando"}
+          onPress={onJoinRoom}
+          variant="dark"
+        />
+      </View>
+
+      <View style={styles.panel}>
+        <Text style={styles.panelTitle}>Como va la cosa</Text>
+        <View style={styles.stageGrid}>
+          <View style={styles.stageCard}>
+            <Text style={styles.stageNumber}>1</Text>
+            <Text style={styles.stageTitle}>Crea la sala</Text>
+            <Text style={styles.stageText}>Elige el mood inicial y comparte el codigo.</Text>
+          </View>
+          <View style={styles.stageCard}>
+            <Text style={styles.stageNumber}>2</Text>
+            <Text style={styles.stageTitle}>Entra el grupo</Text>
+            <Text style={styles.stageText}>Cada persona conecta Spotify desde su movil.</Text>
+          </View>
+          <View style={styles.stageCard}>
+            <Text style={styles.stageNumber}>3</Text>
+            <Text style={styles.stageTitle}>Kazp dirige</Text>
+            <Text style={styles.stageText}>Genera sesion, reacciona en vivo y guarda playlist.</Text>
+          </View>
+        </View>
       </View>
 
       <FeatureGrid />
@@ -809,6 +878,7 @@ function HomeScreen({
 function RoomScreen({
   busyLabel,
   canUsePartyTools,
+  currentMember,
   onConnectSpotify,
   onGenerateSession,
   onInviteFriend,
@@ -817,18 +887,65 @@ function RoomScreen({
 }: {
   busyLabel: string;
   canUsePartyTools: boolean;
+  currentMember: PartyMember | null;
   onConnectSpotify: () => void;
   onGenerateSession: () => void;
   onInviteFriend: () => void;
   onRefresh: () => void;
   room: PartyRoom;
 }) {
+  const isSpotifyReady = Boolean(currentMember);
+
   return (
     <>
+      <LinearGradient colors={["#10211E", "#163630"]} style={styles.roomHero}>
+        <Text style={styles.roomHeroEyebrow}>Sala {room.code}</Text>
+        <Text style={styles.roomHeroTitle}>
+          {isSpotifyReady
+            ? "Tu cuenta ya esta dentro del grupo. Ya puedes generar y guardar la sesion en tu Spotify."
+            : "Anade a tus amigos y conecta tu Spotify para entrar en la mezcla y guardar la playlist final."}
+        </Text>
+        <View style={styles.roomHeroPillRow}>
+          <View style={styles.roomHeroPill}>
+            <Text style={styles.roomHeroPillValue}>{room.members.length}</Text>
+            <Text style={styles.roomHeroPillLabel}>personas</Text>
+          </View>
+          <View style={styles.roomHeroPill}>
+            <Text style={styles.roomHeroPillValue}>{room.scores.compatibility}%</Text>
+            <Text style={styles.roomHeroPillLabel}>compatibles</Text>
+          </View>
+          <View style={styles.roomHeroPill}>
+            <Text style={styles.roomHeroPillValue}>{room.playlist.tracks.length}</Text>
+            <Text style={styles.roomHeroPillLabel}>temas listos</Text>
+          </View>
+        </View>
+      </LinearGradient>
+
       <View style={styles.statsGrid}>
         <Metric label="Amigos" value={String(room.members.length)} />
         <Metric label="Compatibilidad" value={`${room.scores.compatibility}%`} />
         <Metric label="Caos" value={`${room.scores.chaos}%`} hot />
+      </View>
+
+      <View style={styles.panel}>
+        <Text style={styles.panelTitle}>Flujo de sala</Text>
+        <View style={styles.stageGrid}>
+          <View style={styles.stageCard}>
+            <Text style={styles.stageNumber}>1</Text>
+            <Text style={styles.stageTitle}>Anade amigos</Text>
+            <Text style={styles.stageText}>Comparte el codigo y mete al grupo en la sala.</Text>
+          </View>
+          <View style={styles.stageCard}>
+            <Text style={styles.stageNumber}>2</Text>
+            <Text style={styles.stageTitle}>Conectad Spotify</Text>
+            <Text style={styles.stageText}>Cada cuenta se conecta desde su propio movil.</Text>
+          </View>
+          <View style={styles.stageCard}>
+            <Text style={styles.stageNumber}>3</Text>
+            <Text style={styles.stageTitle}>Genera la sesion</Text>
+            <Text style={styles.stageText}>Kazp mezcla el grupo y guarda la playlist final.</Text>
+          </View>
+        </View>
       </View>
 
       <View style={styles.panel}>
@@ -845,7 +962,7 @@ function RoomScreen({
         <View style={styles.actionRow}>
           <AppButton
             icon="share-social"
-            label="Invitar"
+            label="Anadir amigo"
             onPress={onInviteFriend}
           />
           <AppButton icon="refresh" label="Refrescar" onPress={onRefresh} variant="ghost" />
@@ -857,6 +974,23 @@ function RoomScreen({
         <Text style={styles.bodyText}>
           Usa tu propia cuenta para que kazp pueda leer artistas, temas y guardar la playlist final.
         </Text>
+        <View style={styles.spotifyStatusCard}>
+          <Ionicons
+            color={isSpotifyReady ? "#1D7874" : "#D9B44A"}
+            name={isSpotifyReady ? "checkmark-circle" : "musical-notes-outline"}
+            size={22}
+          />
+          <View style={styles.spotifyStatusCopy}>
+            <Text style={styles.spotifyStatusTitle}>
+              {isSpotifyReady ? "Tu Spotify ya esta listo" : "Falta conectar tu cuenta"}
+            </Text>
+            <Text style={styles.spotifyStatusText}>
+              {isSpotifyReady
+                ? "La playlist final se guardara en tu propia biblioteca."
+                : "Sin esta conexion no puedes guardar la sesion final en tu perfil."}
+            </Text>
+          </View>
+        </View>
         <View style={styles.actionRow}>
           <AppButton
             icon="musical-notes"
@@ -877,7 +1011,13 @@ function RoomScreen({
             title="La sala aun esta vacia"
           />
         ) : (
-          room.members.map((member) => <MemberMini key={member.id} member={member} />)
+          room.members.map((member) => (
+            <MemberMini
+              key={member.id}
+              isCurrentUser={member.id === currentMember?.id}
+              member={member}
+            />
+          ))
         )}
         <AppButton
           disabled={!canUsePartyTools}
@@ -927,15 +1067,21 @@ function ProfilesScreen({ members }: { members: PartyMember[] }) {
 
 function SessionScreen({
   canUsePartyTools,
+  currentMember,
   onGenerateSession,
   onSavePlaylist,
   playlist,
+  roomCode,
 }: {
   canUsePartyTools: boolean;
+  currentMember: PartyMember | null;
   onGenerateSession: () => void;
   onSavePlaylist: () => void;
   playlist: PartyRoom["playlist"];
+  roomCode: string;
 }) {
+  const canSaveOnSpotify = Boolean(currentMember);
+
   return (
     <>
       <View style={styles.panel}>
@@ -950,6 +1096,23 @@ function SessionScreen({
             </View>
           ))}
         </View>
+        <View style={styles.spotifyStatusCard}>
+          <Ionicons
+            color={canSaveOnSpotify ? "#1D7874" : "#D9B44A"}
+            name={canSaveOnSpotify ? "save-outline" : "musical-notes-outline"}
+            size={22}
+          />
+          <View style={styles.spotifyStatusCopy}>
+            <Text style={styles.spotifyStatusTitle}>
+              {canSaveOnSpotify ? "Guardar en mi Spotify" : "Conecta tu Spotify para guardar"}
+            </Text>
+            <Text style={styles.spotifyStatusText}>
+              {canSaveOnSpotify
+                ? `La playlist se guardara como "Sala ${roomCode}" en la cuenta conectada de ${currentMember?.displayName}.`
+                : "La sesion final se guarda en tu propia biblioteca, no en la de otro miembro."}
+            </Text>
+          </View>
+        </View>
         <View style={styles.actionRow}>
           <AppButton
             disabled={!canUsePartyTools}
@@ -957,7 +1120,13 @@ function SessionScreen({
             label="Recalcular"
             onPress={onGenerateSession}
           />
-          <AppButton icon="save" label="Guardar" onPress={onSavePlaylist} variant="dark" />
+          <AppButton
+            disabled={!canSaveOnSpotify}
+            icon="save"
+            label="Guardar en Spotify"
+            onPress={onSavePlaylist}
+            variant="dark"
+          />
         </View>
       </View>
 
@@ -1065,7 +1234,6 @@ function ProfileScreen({
   authenticatedUser,
   currentMember,
   isUpdateAvailable,
-  lastUpdateCheckAt,
   onCheckUpdates,
   onConnectSpotify,
   onUpdatePress,
@@ -1076,7 +1244,6 @@ function ProfileScreen({
   authenticatedUser: AuthenticatedUser;
   currentMember: PartyMember | null;
   isUpdateAvailable: boolean;
-  lastUpdateCheckAt: string;
   onCheckUpdates: () => Promise<void>;
   onConnectSpotify: () => Promise<void>;
   onUpdatePress: () => Promise<void>;
@@ -1102,13 +1269,10 @@ function ProfileScreen({
           </View>
           <View style={styles.profileHeroCopy}>
             <Text style={styles.profileHeroName}>{authenticatedUser.displayName}</Text>
-            <Text numberOfLines={1} style={styles.profileHeroEmail}>
-              {authenticatedUser.email}
-            </Text>
             <Text style={styles.profileHeroMeta}>
               {currentMember
-                ? `${currentMember.profile.archetype} | ${currentMember.stats.decadeBias}`
-                : "Conecta tu cuenta de Spotify para completar tu perfil"}
+                ? `${currentMember.profile.archetype} listo para guardar playlists en tu cuenta`
+                : "Conecta tu cuenta de Spotify para completar tu perfil y guardar la sesion final"}
             </Text>
           </View>
         </View>
@@ -1135,22 +1299,44 @@ function ProfileScreen({
       </View>
 
       <View style={styles.panel}>
-        <Text style={styles.panelTitle}>Actualizaciones</Text>
+        <Text style={styles.panelTitle}>Estado de la app</Text>
         <Text style={styles.bodyText}>{updateSummary}</Text>
-        <Text style={styles.helperText}>
-          Ultima comprobacion: {formatShortTime(lastUpdateCheckAt)}. Los cambios de JS, estilos e imagenes pueden entrar por OTA.
-        </Text>
+        <View style={styles.stageGrid}>
+          <View style={styles.stageCard}>
+            <Text style={styles.stageNumber}>Cuenta</Text>
+            <Text style={styles.stageTitle}>Lista</Text>
+            <Text style={styles.stageText}>Tu acceso ya esta activo dentro de kazp.</Text>
+          </View>
+          <View style={styles.stageCard}>
+            <Text style={styles.stageNumber}>Spotify</Text>
+            <Text style={styles.stageTitle}>{currentMember ? "Conectado" : "Pendiente"}</Text>
+            <Text style={styles.stageText}>
+              {currentMember
+                ? "Tu biblioteca ya puede recibir la playlist final."
+                : "Conecta tu cuenta para guardar la sesion en tu perfil."}
+            </Text>
+          </View>
+          <View style={styles.stageCard}>
+            <Text style={styles.stageNumber}>Updates</Text>
+            <Text style={styles.stageTitle}>{isUpdateAvailable ? "Lista" : "Al dia"}</Text>
+            <Text style={styles.stageText}>
+              {isUpdateAvailable
+                ? "Hay cambios esperandote dentro de la app."
+                : "Los cambios visuales y de logica llegaran sin APK nueva."}
+            </Text>
+          </View>
+        </View>
         <View style={styles.actionRow}>
           <AppButton
             icon="refresh"
-            label="Buscar update"
+            label="Buscar cambios"
             loading={updateState === "checking"}
             onPress={onCheckUpdates}
           />
           <AppButton
             disabled={!isUpdateAvailable}
             icon="download"
-            label="Actualizar"
+            label="Actualizar app"
             loading={updateState === "downloading"}
             onPress={onUpdatePress}
             variant="dark"
@@ -1254,15 +1440,37 @@ function CompatibilityCard({ room }: { room: PartyRoom }) {
   );
 }
 
-function MemberMini({ member }: { member: PartyMember }) {
+function MemberMini({
+  isCurrentUser,
+  member,
+}: {
+  isCurrentUser: boolean;
+  member: PartyMember;
+}) {
   return (
-    <View style={styles.memberMini}>
+    <View style={[styles.memberMini, isCurrentUser && styles.memberMiniCurrent]}>
       <Avatar member={member} size={44} />
       <View style={styles.memberMiniText}>
-        <Text style={styles.memberName}>{member.displayName}</Text>
+        <View style={styles.memberMiniTopRow}>
+          <Text style={styles.memberName}>{member.displayName}</Text>
+          {isCurrentUser ? (
+            <View style={styles.memberBadge}>
+              <Text style={styles.memberBadgeText}>Tu cuenta</Text>
+            </View>
+          ) : null}
+        </View>
         <Text numberOfLines={1} style={styles.memberMeta}>
-          {member.profile.archetype} | {member.stats.decadeBias}
+          {member.profile.archetype}
         </Text>
+        <View style={styles.memberTagRow}>
+          {(member.stats.mainGenres.length > 0 ? member.stats.mainGenres : member.topArtists)
+            .slice(0, 2)
+            .map((item) => (
+              <View key={item} style={styles.memberTag}>
+                <Text style={styles.memberTagText}>{item}</Text>
+              </View>
+            ))}
+        </View>
       </View>
       <Text style={styles.miniScore}>{member.stats.partyScore}%</Text>
     </View>
@@ -1343,17 +1551,25 @@ function Pill({ active, label, onPress }: { active: boolean; label: string; onPr
 
 function TabBar({ activeTab, onChange }: { activeTab: TabKey; onChange: (tab: TabKey) => void }) {
   return (
-    <View style={styles.tabBar}>
-      {TABS.map((tab) => (
-        <Pressable
-          key={tab.id}
-          onPress={() => onChange(tab.id)}
-          style={[styles.tabButton, activeTab === tab.id && styles.tabButtonActive]}
-        >
-          <Ionicons color={activeTab === tab.id ? "#EE4266" : "#596663"} name={tab.icon} size={20} />
-          <Text style={[styles.tabText, activeTab === tab.id && styles.tabTextActive]}>{tab.label}</Text>
-        </Pressable>
-      ))}
+    <View style={styles.tabBarShell}>
+      <View style={styles.tabBar}>
+        {TABS.map((tab) => (
+          <Pressable
+            key={tab.id}
+            onPress={() => onChange(tab.id)}
+            style={[styles.tabButton, activeTab === tab.id && styles.tabButtonActive]}
+          >
+            <Ionicons
+              color={activeTab === tab.id ? "#0D1321" : "#D8E3E0"}
+              name={tab.icon}
+              size={18}
+            />
+            <Text style={[styles.tabText, activeTab === tab.id && styles.tabTextActive]}>
+              {tab.label}
+            </Text>
+          </Pressable>
+        ))}
+      </View>
     </View>
   );
 }
@@ -1488,6 +1704,47 @@ const styles = StyleSheet.create({
     height: 46,
     width: 46,
   },
+  homeHero: {
+    borderRadius: 8,
+    marginBottom: 14,
+    overflow: "hidden",
+    padding: 18,
+  },
+  homeEyebrow: {
+    color: "#B8CCC8",
+    fontSize: 12,
+    fontWeight: "900",
+    marginBottom: 8,
+    textTransform: "uppercase",
+  },
+  homeHeroTitle: {
+    color: "#FFFFFF",
+    fontSize: 24,
+    fontWeight: "900",
+    lineHeight: 31,
+  },
+  homeHeroPillRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+    marginTop: 16,
+  },
+  homeHeroPill: {
+    alignItems: "center",
+    backgroundColor: "rgba(255,255,255,0.12)",
+    borderColor: "rgba(255,255,255,0.14)",
+    borderRadius: 999,
+    borderWidth: 1,
+    flexDirection: "row",
+    gap: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+  },
+  homeHeroPillText: {
+    color: "#FFFFFF",
+    fontSize: 12,
+    fontWeight: "800",
+  },
   appName: {
     color: "#FFFFFF",
     fontSize: 20,
@@ -1497,6 +1754,49 @@ const styles = StyleSheet.create({
     color: "#B8CCC8",
     fontSize: 12,
     marginTop: 2,
+  },
+  roomHero: {
+    borderRadius: 8,
+    marginBottom: 14,
+    overflow: "hidden",
+    padding: 16,
+  },
+  roomHeroEyebrow: {
+    color: "#B8CCC8",
+    fontSize: 12,
+    fontWeight: "900",
+    textTransform: "uppercase",
+  },
+  roomHeroTitle: {
+    color: "#FFFFFF",
+    fontSize: 20,
+    fontWeight: "900",
+    lineHeight: 27,
+    marginTop: 8,
+  },
+  roomHeroPillRow: {
+    flexDirection: "row",
+    gap: 10,
+    marginTop: 16,
+  },
+  roomHeroPill: {
+    backgroundColor: "rgba(255,255,255,0.12)",
+    borderColor: "rgba(255,255,255,0.14)",
+    borderRadius: 8,
+    borderWidth: 1,
+    flex: 1,
+    padding: 10,
+  },
+  roomHeroPillValue: {
+    color: "#FFFFFF",
+    fontSize: 22,
+    fontWeight: "900",
+  },
+  roomHeroPillLabel: {
+    color: "#B8CCC8",
+    fontSize: 11,
+    fontWeight: "800",
+    marginTop: 4,
   },
   profileHero: {
     borderRadius: 8,
@@ -1628,14 +1928,18 @@ const styles = StyleSheet.create({
     color: "#0D1321",
   },
   tabBar: {
-    backgroundColor: "#FFFFFF",
-    borderBottomColor: "#E3DED0",
-    borderBottomWidth: 1,
+    backgroundColor: "#10211E",
+    borderRadius: 20,
     flexDirection: "row",
     gap: 6,
-    justifyContent: "space-around",
-    paddingHorizontal: 8,
-    paddingVertical: 8,
+    padding: 6,
+  },
+  tabBarShell: {
+    backgroundColor: "#F8F4E3",
+    borderBottomColor: "#E3DED0",
+    borderBottomWidth: 1,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
   },
   updateBanner: {
     alignItems: "center",
@@ -1692,15 +1996,15 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
   },
   tabButtonActive: {
-    backgroundColor: "#FDEFD0",
+    backgroundColor: "#D9B44A",
   },
   tabText: {
-    color: "#596663",
+    color: "#D8E3E0",
     fontSize: 11,
     fontWeight: "800",
   },
   tabTextActive: {
-    color: "#EE4266",
+    color: "#0D1321",
   },
   content: {
     padding: 16,
@@ -1748,6 +2052,31 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: "700",
     marginTop: 6,
+  },
+  spotifyStatusCard: {
+    alignItems: "flex-start",
+    backgroundColor: "#F8F4E3",
+    borderColor: "#E3DED0",
+    borderRadius: 8,
+    borderWidth: 1,
+    flexDirection: "row",
+    gap: 12,
+    marginBottom: 12,
+    padding: 12,
+  },
+  spotifyStatusCopy: {
+    flex: 1,
+  },
+  spotifyStatusTitle: {
+    color: "#0D1321",
+    fontSize: 14,
+    fontWeight: "900",
+  },
+  spotifyStatusText: {
+    color: "#596663",
+    fontSize: 13,
+    lineHeight: 18,
+    marginTop: 4,
   },
   helperText: {
     color: "#6C7774",
@@ -1803,6 +2132,34 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     gap: 10,
     marginBottom: 10,
+  },
+  stageGrid: {
+    gap: 10,
+  },
+  stageCard: {
+    backgroundColor: "#F8F4E3",
+    borderColor: "#E3DED0",
+    borderRadius: 8,
+    borderWidth: 1,
+    padding: 12,
+  },
+  stageNumber: {
+    color: "#1D7874",
+    fontSize: 12,
+    fontWeight: "900",
+    textTransform: "uppercase",
+  },
+  stageTitle: {
+    color: "#0D1321",
+    fontSize: 15,
+    fontWeight: "900",
+    marginTop: 4,
+  },
+  stageText: {
+    color: "#596663",
+    fontSize: 13,
+    lineHeight: 18,
+    marginTop: 4,
   },
   featureGrid: {
     flexDirection: "row",
@@ -1877,15 +2234,26 @@ const styles = StyleSheet.create({
     color: "#EE4266",
   },
   memberMini: {
-    alignItems: "center",
-    borderBottomColor: "#EEE7D8",
-    borderBottomWidth: 1,
+    backgroundColor: "#F8F4E3",
+    borderColor: "#E3DED0",
+    borderRadius: 8,
+    borderWidth: 1,
     flexDirection: "row",
     gap: 10,
-    paddingVertical: 10,
+    marginBottom: 10,
+    padding: 12,
+  },
+  memberMiniCurrent: {
+    backgroundColor: "#F0FBF8",
+    borderColor: "#1D7874",
   },
   memberMiniText: {
     flex: 1,
+  },
+  memberMiniTopRow: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: 8,
   },
   memberName: {
     color: "#0D1321",
@@ -1901,6 +2269,37 @@ const styles = StyleSheet.create({
     color: "#1D7874",
     fontSize: 16,
     fontWeight: "900",
+  },
+  memberBadge: {
+    backgroundColor: "#10211E",
+    borderRadius: 999,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  memberBadgeText: {
+    color: "#FFFFFF",
+    fontSize: 10,
+    fontWeight: "900",
+    textTransform: "uppercase",
+  },
+  memberTagRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 6,
+    marginTop: 8,
+  },
+  memberTag: {
+    backgroundColor: "#FFFFFF",
+    borderColor: "#E3DED0",
+    borderRadius: 999,
+    borderWidth: 1,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  memberTagText: {
+    color: "#596663",
+    fontSize: 11,
+    fontWeight: "800",
   },
   scoreRow: {
     alignItems: "center",

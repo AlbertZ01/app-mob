@@ -89,6 +89,7 @@ app.post("/rooms/:code/demo-friend", asyncRoute(async (req, res) => {
 app.get("/spotify/login", asyncRoute(async (req, res) => {
   const roomCode = String(req.query.roomCode || "").trim().toUpperCase();
   const displayName = String(req.query.displayName || "Invitado").trim().slice(0, 40);
+  const appUserId = String(req.query.appUserId || "").trim().slice(0, 120);
 
   getRoomOrThrow(roomCode);
   ensureSpotifyConfig();
@@ -99,6 +100,7 @@ app.get("/spotify/login", asyncRoute(async (req, res) => {
   const redirectUri = spotifyRedirectUri();
 
   authStates.set(state, {
+    appUserId,
     codeVerifier,
     displayName,
     expiresAt: Date.now() + 10 * 60 * 1000,
@@ -136,7 +138,7 @@ app.get("/spotify/callback", asyncRoute(async (req, res) => {
 
   const room = getRoomOrThrow(authState.roomCode);
   const token = await exchangeSpotifyCode(code, authState.codeVerifier);
-  const member = await createMemberFromSpotify(token, authState.displayName);
+  const member = await createMemberFromSpotify(token, authState.displayName, authState.appUserId);
 
   upsertMember(room, member);
   refreshRoomState(room);
@@ -195,12 +197,18 @@ app.post("/rooms/:code/summary", asyncRoute(async (req, res) => {
 app.post("/rooms/:code/playlist/save", asyncRoute(async (req, res) => {
   const room = getRoomOrThrow(req.params.code);
   const input = savePlaylistSchema.parse(req.body || {});
-  const member =
-    room.members.find((candidate) => candidate.id === input.memberId && candidate.accessToken) ||
-    room.members.find((candidate) => candidate.accessToken);
+  const connectedMembers = room.members.filter((candidate) => candidate.accessToken);
+  const member = input.memberId
+    ? room.members.find((candidate) => candidate.id === input.memberId && candidate.accessToken)
+    : connectedMembers.length === 1
+      ? connectedMembers[0]
+      : null;
 
   if (!member) {
-    throw new ApiError(400, "Conecta Spotify con un usuario real antes de guardar playlists.");
+    throw new ApiError(
+      400,
+      "Conecta Spotify con esta misma cuenta antes de guardar la playlist en tu perfil.",
+    );
   }
 
   const uris = unique(room.playlist.tracks.map((track) => track.uri).filter(Boolean));
@@ -658,7 +666,7 @@ async function exchangeSpotifyCode(code, codeVerifier) {
   return response.json();
 }
 
-async function createMemberFromSpotify(token, fallbackName) {
+async function createMemberFromSpotify(token, fallbackName, appUserId = "") {
   const [profile, topArtists, topTracksShort, topTracksMedium, topTracksLong] = await Promise.all([
     spotifyGet(token.access_token, "/me"),
     spotifyGet(token.access_token, "/me/top/artists?time_range=medium_term&limit=30"),
@@ -679,6 +687,7 @@ async function createMemberFromSpotify(token, fallbackName) {
 
   const member = {
     accessToken: token.access_token,
+    appUserId,
     avatarUrl: profile.images?.[0]?.url || "",
     connectedAt: new Date().toISOString(),
     displayName: profile.display_name || fallbackName || "Spotify friend",
@@ -742,7 +751,7 @@ async function throwSpotifyResponseError(response, action) {
   if (response.status === 403) {
     throw new ApiError(
       403,
-      `${action}. Spotify ha rechazado esta cuenta. Si tu app de Spotify sigue en modo desarrollo, añade este usuario en Spotify Dashboard > Users and access y vuelve a conectar Spotify.`,
+      `${action}. Spotify ha rechazado esta cuenta. Si tu app de Spotify sigue en modo desarrollo, anade este usuario en Spotify Dashboard > Users and access y vuelve a conectar Spotify.`,
     );
   }
 
@@ -1405,3 +1414,4 @@ const demoPresets = [
     ],
   },
 ];
+

@@ -64,11 +64,16 @@ export function getRoom(code: string): Promise<PartyRoom> {
 export function getSpotifyLoginUrl(
   code: string,
   displayName: string,
+  appUserId?: string,
 ): Promise<SpotifyLoginResponse> {
   const query = new URLSearchParams({
     roomCode: code.toUpperCase(),
     displayName: displayName.trim() || "Invitado",
   });
+
+  if (appUserId) {
+    query.set("appUserId", appUserId);
+  }
 
   return request<SpotifyLoginResponse>(`/spotify/login?${query}`);
 }
