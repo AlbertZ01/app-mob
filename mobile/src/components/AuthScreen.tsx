@@ -169,8 +169,9 @@ export function AuthScreen({
             Redirect esperado: `appmob://auth/callback`.
           </Text>
           <Text style={styles.noteText}>
-            Si creas cuenta y no entra al momento, desactiva `Confirm email` en Supabase o confirma
-            el correo antes de volver a iniciar sesion.
+            Si creas cuenta y no entra al momento, desactiva `Email Confirmations` en la seccion
+            `Authentication / Settings` de Supabase o confirma el correo antes de volver a iniciar
+            sesion.
           </Text>
         </View>
       </ScrollView>

@@ -85,7 +85,7 @@ function mapAuthError(error: unknown) {
   const raw = error instanceof Error ? error.message : "No se pudo autenticar la cuenta.";
 
   if (/email not confirmed/i.test(raw)) {
-    return "La cuenta existe, pero Supabase exige confirmar el correo. Abre el email de confirmacion o desactiva Confirm email en Supabase > Authentication > Providers > Email.";
+    return "La cuenta existe, pero Supabase exige confirmar el correo. Abre el email de confirmacion o desactiva Email Confirmations en Supabase > Authentication > Settings.";
   }
 
   if (/invalid login credentials/i.test(raw)) {
@@ -287,7 +287,7 @@ export default function App() {
       if (!data.session) {
         Alert.alert(
           "Cuenta creada",
-          "Supabase ha creado la cuenta, pero todavia no ha abierto sesion. Si tienes Confirm email activado, confirma el correo y vuelve a entrar. Si quieres entrar al instante, desactiva Confirm email en Supabase > Authentication > Providers > Email.",
+          "Supabase ha creado la cuenta, pero todavia no ha abierto sesion. Si tienes Confirm email activado, confirma el correo y vuelve a entrar. Si quieres entrar al instante, desactiva Email Confirmations en Supabase > Authentication > Settings.",
         );
       }
     });
