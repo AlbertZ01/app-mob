@@ -45,7 +45,7 @@ import {
 import type { PartyMember, PartyMode, PartyRoom, Track } from "./src/types/party";
 
 type IconName = ComponentProps<typeof Ionicons>["name"];
-type TabKey = "sala" | "perfiles" | "sesion" | "live" | "resumen";
+type TabKey = "sala" | "perfiles" | "sesion" | "live" | "resumen" | "perfil";
 type AuthProvider = "apple" | "google";
 type AuthenticatedUser = {
   displayName: string;
@@ -72,6 +72,7 @@ const TABS: { id: TabKey; label: string; icon: IconName }[] = [
   { id: "sesion", label: "Sesion", icon: "radio" },
   { id: "live", label: "Live", icon: "pulse" },
   { id: "resumen", label: "Final", icon: "trophy" },
+  { id: "perfil", label: "Perfil", icon: "person-circle" },
 ];
 
 const LIVE_VOTES = [
@@ -114,6 +115,7 @@ export default function App() {
   const [authBusy, setAuthBusy] = useState("");
   const [authReady, setAuthReady] = useState(false);
   const [isUpdateAvailable, setIsUpdateAvailable] = useState(false);
+  const [lastUpdateCheckAt, setLastUpdateCheckAt] = useState("");
   const [session, setSession] = useState<Session | null>(null);
   const [updateError, setUpdateError] = useState("");
   const [updateState, setUpdateState] = useState<UpdateState>("idle");
@@ -196,9 +198,11 @@ export default function App() {
       setUpdateError("");
       const update = await Updates.checkForUpdateAsync();
 
+      setLastUpdateCheckAt(new Date().toISOString());
       setIsUpdateAvailable(update.isAvailable);
       setUpdateState(update.isAvailable ? "ready" : "idle");
     } catch (error) {
+      setLastUpdateCheckAt(new Date().toISOString());
       setIsUpdateAvailable(false);
       setUpdateState("idle");
       setUpdateError(error instanceof Error ? error.message : "No se pudo buscar una actualizacion.");
@@ -387,10 +391,14 @@ export default function App() {
     <SafeAreaProvider>
       <PartyExperience
         authenticatedUser={sessionToUser(session)}
+        buildReleaseId={appReleaseId}
         isUpdateAvailable={isUpdateAvailable}
+        lastUpdateCheckAt={lastUpdateCheckAt}
+        onCheckUpdates={checkForUpdates}
         onSignOut={handleSignOut}
         onUpdatePress={handleApplyUpdate}
         signingOut={authBusy === "signout"}
+        supabaseProjectHost={supabaseProjectHost}
         updateError={updateError}
         updateState={updateState}
       />
@@ -400,18 +408,26 @@ export default function App() {
 
 function PartyExperience({
   authenticatedUser,
+  buildReleaseId,
   isUpdateAvailable,
+  lastUpdateCheckAt,
+  onCheckUpdates,
   onSignOut,
   onUpdatePress,
   signingOut,
+  supabaseProjectHost,
   updateError,
   updateState,
 }: {
   authenticatedUser: AuthenticatedUser;
+  buildReleaseId: string;
   isUpdateAvailable: boolean;
+  lastUpdateCheckAt: string;
+  onCheckUpdates: () => Promise<void>;
   onSignOut: () => Promise<void>;
   onUpdatePress: () => Promise<void>;
   signingOut: boolean;
+  supabaseProjectHost: string | null;
   updateError: string;
   updateState: UpdateState;
 }) {
@@ -425,6 +441,9 @@ function PartyExperience({
 
   const memberCount = room?.members.length || 0;
   const canUsePartyTools = memberCount > 0 && !busyLabel;
+  const currentMember = room
+    ? findMatchingMember(room.members, authenticatedUser.displayName, authenticatedUser.email)
+    : null;
 
   useEffect(() => {
     setDisplayName(authenticatedUser.displayName);
@@ -667,6 +686,22 @@ function PartyExperience({
               {activeTab === "resumen" ? (
                 <SummaryScreen onFinishParty={handleFinishParty} summary={room.summary} />
               ) : null}
+              {activeTab === "perfil" ? (
+                <ProfileScreen
+                  authenticatedUser={authenticatedUser}
+                  buildReleaseId={buildReleaseId}
+                  currentMember={currentMember}
+                  isUpdateAvailable={isUpdateAvailable}
+                  lastUpdateCheckAt={lastUpdateCheckAt}
+                  onCheckUpdates={onCheckUpdates}
+                  onConnectSpotify={handleConnectSpotify}
+                  onUpdatePress={onUpdatePress}
+                  room={room}
+                  supabaseProjectHost={supabaseProjectHost}
+                  updateError={updateError}
+                  updateState={updateState}
+                />
+              ) : null}
             </ScrollView>
           </>
         ) : (
@@ -698,6 +733,41 @@ function sessionToUser(session: Session): AuthenticatedUser {
     displayName,
     email: session.user.email || "usuario sin correo",
   };
+}
+
+function findMatchingMember(members: PartyMember[], displayName: string, email: string) {
+  const normalizedDisplayName = normalizeIdentity(displayName);
+  const normalizedEmailAlias = normalizeIdentity(email.split("@")[0] || "");
+
+  return (
+    members.find((member) => normalizeIdentity(member.displayName) === normalizedDisplayName) ||
+    members.find((member) => normalizeIdentity(member.displayName) === normalizedEmailAlias) ||
+    null
+  );
+}
+
+function normalizeIdentity(value: string) {
+  return value.trim().toLowerCase();
+}
+
+function formatShortTime(value: string) {
+  if (!value) {
+    return "todavia no";
+  }
+
+  return new Date(value).toLocaleTimeString("es-ES", {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function initialsFor(name: string) {
+  return name
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((chunk) => chunk[0]?.toUpperCase() || "")
+    .join("");
 }
 
 function HomeScreen({
@@ -1002,6 +1072,155 @@ function SummaryScreen({
   );
 }
 
+function ProfileScreen({
+  authenticatedUser,
+  buildReleaseId,
+  currentMember,
+  isUpdateAvailable,
+  lastUpdateCheckAt,
+  onCheckUpdates,
+  onConnectSpotify,
+  onUpdatePress,
+  room,
+  supabaseProjectHost,
+  updateError,
+  updateState,
+}: {
+  authenticatedUser: AuthenticatedUser;
+  buildReleaseId: string;
+  currentMember: PartyMember | null;
+  isUpdateAvailable: boolean;
+  lastUpdateCheckAt: string;
+  onCheckUpdates: () => Promise<void>;
+  onConnectSpotify: () => Promise<void>;
+  onUpdatePress: () => Promise<void>;
+  room: PartyRoom;
+  supabaseProjectHost: string | null;
+  updateError: string;
+  updateState: UpdateState;
+}) {
+  const updateBusy = updateState === "checking" || updateState === "downloading";
+  const updateSummary = updateError
+    ? updateError
+    : updateBusy
+      ? "Buscando o descargando cambios para esta build."
+      : isUpdateAvailable
+        ? "Hay una nueva version OTA lista para aplicarse sin instalar otra APK."
+        : "Esta build ya puede recibir cambios de interfaz y logica por OTA sin recompilar APK.";
+
+  return (
+    <>
+      <LinearGradient colors={["#0D1321", "#1D7874"]} style={styles.profileHero}>
+        <View style={styles.profileHeroTop}>
+          <View style={styles.profileAvatar}>
+            <Text style={styles.profileAvatarText}>{initialsFor(authenticatedUser.displayName)}</Text>
+          </View>
+          <View style={styles.profileHeroCopy}>
+            <Text style={styles.profileHeroName}>{authenticatedUser.displayName}</Text>
+            <Text numberOfLines={1} style={styles.profileHeroEmail}>
+              {authenticatedUser.email}
+            </Text>
+            <Text style={styles.profileHeroMeta}>
+              Build {buildReleaseId} | {supabaseProjectHost || "Supabase no configurado"}
+            </Text>
+          </View>
+        </View>
+        <View style={styles.profilePillRow}>
+          <View style={styles.profilePill}>
+            <Ionicons color="#D9B44A" name="albums-outline" size={14} />
+            <Text style={styles.profilePillText}>Sala {room.code}</Text>
+          </View>
+          <View style={styles.profilePill}>
+            <Ionicons color="#D9B44A" name="people-outline" size={14} />
+            <Text style={styles.profilePillText}>{room.members.length} conectados</Text>
+          </View>
+          <View style={styles.profilePill}>
+            <Ionicons color="#D9B44A" name={currentMember ? "musical-notes-outline" : "radio-outline"} size={14} />
+            <Text style={styles.profilePillText}>{currentMember ? "Spotify listo" : "Spotify pendiente"}</Text>
+          </View>
+        </View>
+      </LinearGradient>
+
+      <View style={styles.statsGrid}>
+        <Metric hot label="Fiesta" value={currentMember ? `${currentMember.stats.partyScore}%` : "--"} />
+        <Metric label="Caos" value={currentMember ? `${currentMember.stats.chaosScore}%` : `${room.scores.chaos}%`} />
+        <Metric label="Repeticion" value={currentMember ? `${currentMember.stats.repeatRisk}%` : "--"} />
+      </View>
+
+      <View style={styles.panel}>
+        <Text style={styles.panelTitle}>Actualizaciones</Text>
+        <Text style={styles.bodyText}>{updateSummary}</Text>
+        <Text style={styles.helperText}>
+          Ultima comprobacion: {formatShortTime(lastUpdateCheckAt)}. Los cambios de JS, estilos e imagenes pueden entrar por OTA.
+        </Text>
+        <View style={styles.actionRow}>
+          <AppButton
+            icon="refresh"
+            label="Buscar update"
+            loading={updateState === "checking"}
+            onPress={onCheckUpdates}
+          />
+          <AppButton
+            disabled={!isUpdateAvailable}
+            icon="download"
+            label="Actualizar"
+            loading={updateState === "downloading"}
+            onPress={onUpdatePress}
+            variant="dark"
+          />
+        </View>
+      </View>
+
+      <View style={styles.panel}>
+        <Text style={styles.panelTitle}>Mi perfil musical</Text>
+        {currentMember ? (
+          <>
+            <View style={styles.profileMemberRow}>
+              <Avatar member={currentMember} size={58} />
+              <View style={styles.profileMemberCopy}>
+                <Text style={styles.memberName}>{currentMember.displayName}</Text>
+                <Text style={styles.archetype}>{currentMember.profile.archetype}</Text>
+              </View>
+              <Text style={styles.miniScore}>{currentMember.stats.partyScore}%</Text>
+            </View>
+            <Text style={styles.roastText}>{currentMember.profile.roast}</Text>
+            <TagSection color="#1D7874" items={currentMember.profile.strengths} title="Fortalezas" />
+            <TagSection color="#EE4266" items={currentMember.profile.crimes} title="Delitos musicales" />
+            <TagSection color="#D9B44A" items={currentMember.topArtists.slice(0, 4)} title="Top artistas" />
+            <View style={styles.actionRow}>
+              <AppButton
+                icon="musical-notes-outline"
+                label="Reconectar Spotify"
+                onPress={onConnectSpotify}
+              />
+              <AppButton
+                disabled={!currentMember.spotifyUrl}
+                icon="open-outline"
+                label="Abrir perfil"
+                onPress={() => {
+                  if (currentMember.spotifyUrl) {
+                    void NativeLinking.openURL(currentMember.spotifyUrl);
+                  }
+                }}
+                variant="ghost"
+              />
+            </View>
+          </>
+        ) : (
+          <>
+            <EmptyState
+              icon="person-circle-outline"
+              text="Todavia no hay un perfil de Spotify emparejado con esta cuenta dentro de la sala."
+              title="Conecta tu Spotify"
+            />
+            <AppButton icon="musical-notes-outline" label="Conectar Spotify" onPress={onConnectSpotify} />
+          </>
+        )}
+      </View>
+    </>
+  );
+}
+
 function FeatureGrid() {
   const items: { icon: IconName; title: string; text: string }[] = [
     { icon: "person-circle", title: "Perfiles", text: "Arquetipos, roasts y delitos musicales." },
@@ -1288,6 +1507,73 @@ const styles = StyleSheet.create({
     fontSize: 12,
     marginTop: 2,
   },
+  profileHero: {
+    borderRadius: 8,
+    marginBottom: 14,
+    overflow: "hidden",
+    padding: 16,
+  },
+  profileHeroTop: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: 12,
+  },
+  profileAvatar: {
+    alignItems: "center",
+    backgroundColor: "rgba(255,255,255,0.12)",
+    borderColor: "rgba(255,255,255,0.14)",
+    borderRadius: 18,
+    borderWidth: 1,
+    height: 64,
+    justifyContent: "center",
+    width: 64,
+  },
+  profileAvatarText: {
+    color: "#FFFFFF",
+    fontSize: 24,
+    fontWeight: "900",
+  },
+  profileHeroCopy: {
+    flex: 1,
+  },
+  profileHeroName: {
+    color: "#FFFFFF",
+    fontSize: 22,
+    fontWeight: "900",
+  },
+  profileHeroEmail: {
+    color: "#D8E3E0",
+    fontSize: 13,
+    marginTop: 2,
+  },
+  profileHeroMeta: {
+    color: "#B8CCC8",
+    fontSize: 11,
+    fontWeight: "800",
+    marginTop: 6,
+  },
+  profilePillRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+    marginTop: 14,
+  },
+  profilePill: {
+    alignItems: "center",
+    backgroundColor: "rgba(255,255,255,0.12)",
+    borderColor: "rgba(255,255,255,0.14)",
+    borderRadius: 999,
+    borderWidth: 1,
+    flexDirection: "row",
+    gap: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+  },
+  profilePillText: {
+    color: "#FFFFFF",
+    fontSize: 12,
+    fontWeight: "800",
+  },
   title: {
     color: "#FFFFFF",
     fontSize: 28,
@@ -1406,8 +1692,9 @@ const styles = StyleSheet.create({
   },
   tabButton: {
     alignItems: "center",
+    flex: 1,
     gap: 3,
-    minWidth: 58,
+    minWidth: 52,
   },
   tabText: {
     color: "#596663",
@@ -1439,6 +1726,13 @@ const styles = StyleSheet.create({
     color: "#4E5B58",
     fontSize: 14,
     lineHeight: 20,
+    marginBottom: 12,
+  },
+  helperText: {
+    color: "#6C7774",
+    fontSize: 12,
+    fontWeight: "700",
+    lineHeight: 18,
     marginBottom: 12,
   },
   input: {
@@ -1629,6 +1923,15 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     gap: 12,
     marginBottom: 12,
+  },
+  profileMemberRow: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: 12,
+    marginBottom: 12,
+  },
+  profileMemberCopy: {
+    flex: 1,
   },
   profileHeaderText: {
     flex: 1,

@@ -19,7 +19,15 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const contentType = response.headers.get("content-type") || "";
   const raw = await response.text();
   const isJson = contentType.includes("application/json");
-  const payload = raw && isJson ? JSON.parse(raw) : null;
+  let payload: unknown = null;
+
+  if (raw && isJson) {
+    try {
+      payload = JSON.parse(raw);
+    } catch {
+      throw new Error("La API respondio con JSON invalido.");
+    }
+  }
 
   if (!response.ok) {
     if (payload && typeof payload === "object" && "error" in payload) {

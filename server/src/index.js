@@ -711,10 +711,45 @@ async function spotifyGet(accessToken, path) {
   });
 
   if (!response.ok) {
-    throw new ApiError(502, `Spotify request failed: ${response.status}`);
+    await throwSpotifyResponseError(response, "No se pudo leer tu perfil de Spotify");
   }
 
   return response.json();
+}
+
+async function readSpotifyError(response) {
+  const raw = await response.text();
+
+  if (!raw) {
+    return "";
+  }
+
+  try {
+    const payload = JSON.parse(raw);
+    return payload?.error?.message || payload?.error_description || raw;
+  } catch {
+    return raw;
+  }
+}
+
+async function throwSpotifyResponseError(response, action) {
+  const detail = await readSpotifyError(response);
+
+  if (response.status === 401) {
+    throw new ApiError(401, "La sesion de Spotify ha caducado. Vuelve a conectar Spotify.");
+  }
+
+  if (response.status === 403) {
+    throw new ApiError(
+      403,
+      `${action}. Spotify ha rechazado esta cuenta. Si tu app de Spotify sigue en modo desarrollo, añade este usuario en Spotify Dashboard > Users and access y vuelve a conectar Spotify.`,
+    );
+  }
+
+  throw new ApiError(
+    502,
+    `${action}. Spotify devolvio ${response.status}${detail ? `: ${detail}` : ""}`,
+  );
 }
 
 async function refreshSpotifyAccessToken(member) {
@@ -735,8 +770,7 @@ async function refreshSpotifyAccessToken(member) {
   });
 
   if (!response.ok) {
-    const body = await response.text();
-    throw new ApiError(502, `Spotify token refresh failed: ${response.status} ${body}`);
+    await throwSpotifyResponseError(response, "No se pudo renovar la sesion de Spotify");
   }
 
   const token = await response.json();
@@ -785,7 +819,7 @@ async function createSpotifyPlaylist(member, room, uris) {
   });
 
   if (!response.ok) {
-    throw new ApiError(502, `Spotify playlist create failed: ${response.status} ${await response.text()}`);
+    await throwSpotifyResponseError(response, "No se pudo crear la playlist en Spotify");
   }
 
   const playlist = await response.json();
@@ -798,12 +832,15 @@ async function createSpotifyPlaylist(member, room, uris) {
         "Content-Type": "application/json",
       },
       method: "POST",
-    });
+      });
 
-    if (!addResponse.ok) {
-      throw new ApiError(502, `Spotify playlist add failed: ${addResponse.status} ${await addResponse.text()}`);
+      if (!addResponse.ok) {
+        await throwSpotifyResponseError(
+          addResponse,
+          "Spotify ha rechazado algunas canciones al guardarlas en la playlist",
+        );
+      }
     }
-  }
 
   return {
     playlistId: playlist.id,
