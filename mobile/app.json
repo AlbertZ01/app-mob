@@ -1,13 +1,21 @@
 {
   "expo": {
-    "name": "AUX Roast",
+    "name": "kazp",
     "slug": "app-mob",
     "version": "0.1.0",
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
     "orientation": "portrait",
-    "description": "Party app that reads the group's Spotify taste, generates roasts and builds a live playlist.",
+    "description": "kazp analyzes the group's Spotify taste, signs users in and keeps the party session updated live.",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
     "scheme": "appmob",
+    "updates": {
+      "url": "https://u.expo.dev/ac34996a-8275-461a-a05d-8daf9fc9f2dd",
+      "checkAutomatically": "ON_LOAD",
+      "fallbackToCacheTimeout": 0
+    },
     "assetBundlePatterns": [
       "**/*"
     ],

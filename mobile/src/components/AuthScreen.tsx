@@ -3,6 +3,7 @@ import { LinearGradient } from "expo-linear-gradient";
 import { useState } from "react";
 import {
   ActivityIndicator,
+  Platform,
   Pressable,
   SafeAreaView,
   ScrollView,
@@ -17,25 +18,74 @@ type Provider = "apple" | "google";
 export function AuthScreen({
   busy,
   canUseAuth,
+  buildReleaseId,
   onSignIn,
   onSignUp,
   onSocial,
+  supabaseProjectHost,
 }: {
   busy: string;
   canUseAuth: boolean;
+  buildReleaseId: string;
   onSignIn: (email: string, password: string) => Promise<void>;
   onSignUp: (email: string, password: string) => Promise<void>;
   onSocial: (provider: Provider) => Promise<void>;
+  supabaseProjectHost: string | null;
 }) {
   const [email, setEmail] = useState("");
+  const [feedback, setFeedback] = useState("");
   const [password, setPassword] = useState("");
 
-  const disabled = !canUseAuth || email.trim().length < 5 || password.trim().length < 6;
+  function validateCredentials() {
+    if (!canUseAuth) {
+      return "Esta APK no lleva la configuracion de Supabase. Instala la build nueva antes de probar el login.";
+    }
+
+    if (!email.includes("@") || email.trim().length < 6) {
+      return "Escribe un correo real antes de continuar.";
+    }
+
+    if (password.length < 6) {
+      return "La contrasena necesita al menos 6 caracteres.";
+    }
+
+    return null;
+  }
+
+  async function handleEmailAction(action: "signin" | "signup") {
+    const nextFeedback = validateCredentials();
+
+    if (nextFeedback) {
+      setFeedback(nextFeedback);
+      return;
+    }
+
+    setFeedback("");
+
+    if (action === "signin") {
+      await onSignIn(email.trim(), password);
+      return;
+    }
+
+    await onSignUp(email.trim(), password);
+  }
+
+  async function handleSocial(provider: Provider) {
+    if (!canUseAuth) {
+      setFeedback(
+        "Esta APK no lleva Supabase embebido. Reinstala la build que muestre un proyecto valido en esta pantalla.",
+      );
+      return;
+    }
+
+    setFeedback("");
+    await onSocial(provider);
+  }
 
   return (
     <SafeAreaView style={styles.safeArea}>
       <LinearGradient colors={["#0D1321", "#1D7874"]} style={styles.header}>
-        <Text style={styles.title}>AUX Roast</Text>
+        <Text style={styles.title}>kazp</Text>
         <Text style={styles.subtitle}>
           Antes de entrar en la fiesta, cada persona necesita cuenta propia.
         </Text>
@@ -44,8 +94,12 @@ export function AuthScreen({
       <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
         <View style={styles.card}>
           <Text style={styles.cardTitle}>Inicia sesion</Text>
+          <Text style={styles.metaText}>
+            Build {buildReleaseId} | {supabaseProjectHost || "Supabase sin configurar"}
+          </Text>
           <TextInput
             autoCapitalize="none"
+            autoComplete="email"
             keyboardType="email-address"
             onChangeText={setEmail}
             placeholder="correo@ejemplo.com"
@@ -55,6 +109,7 @@ export function AuthScreen({
           />
           <TextInput
             autoCapitalize="none"
+            autoComplete="password"
             onChangeText={setPassword}
             placeholder="Contrasena"
             placeholderTextColor="#6C7774"
@@ -63,19 +118,24 @@ export function AuthScreen({
             value={password}
           />
 
+          {feedback ? <Text style={styles.feedbackError}>{feedback}</Text> : null}
+          {!feedback ? (
+            <Text style={styles.feedbackHint}>
+              Usa un correo real y una contrasena de al menos 6 caracteres.
+            </Text>
+          ) : null}
+
           <ButtonRow
             busy={busy}
-            disabled={disabled}
             label="Entrar"
             loadingKey="signin"
-            onPress={() => onSignIn(email.trim(), password)}
+            onPress={() => void handleEmailAction("signin")}
           />
           <ButtonRow
             busy={busy}
-            disabled={disabled}
             label="Crear cuenta"
             loadingKey="signup"
-            onPress={() => onSignUp(email.trim(), password)}
+            onPress={() => void handleEmailAction("signup")}
             variant="ghost"
           />
 
@@ -83,31 +143,34 @@ export function AuthScreen({
 
           <ButtonRow
             busy={busy}
-            disabled={!canUseAuth}
             icon="logo-google"
             label="Google"
             loadingKey="google"
-            onPress={() => onSocial("google")}
+            onPress={() => void handleSocial("google")}
           />
-          <ButtonRow
-            busy={busy}
-            disabled={!canUseAuth}
-            icon="logo-apple"
-            label="Apple"
-            loadingKey="apple"
-            onPress={() => onSocial("apple")}
-            variant="dark"
-          />
+          {Platform.OS === "ios" ? (
+            <ButtonRow
+              busy={busy}
+              icon="logo-apple"
+              label="Apple"
+              loadingKey="apple"
+              onPress={() => void handleSocial("apple")}
+              variant="dark"
+            />
+          ) : null}
         </View>
 
         <View style={styles.noteCard}>
-          <Text style={styles.noteTitle}>Configuracion necesaria</Text>
+          <Text style={styles.noteTitle}>Diagnostico de login</Text>
           <Text style={styles.noteText}>
-            Esta version exige autenticacion. Configura `EXPO_PUBLIC_SUPABASE_URL` y
-            `EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY` en `mobile/.env`.
+            Estado de auth: {canUseAuth ? "Supabase conectado" : "faltan variables en la build"}.
           </Text>
           <Text style={styles.noteText}>
-            En Supabase, anade `appmob://auth/callback` como Redirect URL para Google y Apple.
+            Redirect esperado: `appmob://auth/callback`.
+          </Text>
+          <Text style={styles.noteText}>
+            Si creas cuenta y no entra al momento, desactiva `Confirm email` en Supabase o confirma
+            el correo antes de volver a iniciar sesion.
           </Text>
         </View>
       </ScrollView>
@@ -127,7 +190,6 @@ function Separator({ label }: { label: string }) {
 
 function ButtonRow({
   busy,
-  disabled,
   icon,
   label,
   loadingKey,
@@ -135,7 +197,6 @@ function ButtonRow({
   variant = "primary",
 }: {
   busy: string;
-  disabled: boolean;
   icon?: keyof typeof Ionicons.glyphMap;
   label: string;
   loadingKey: string;
@@ -146,13 +207,13 @@ function ButtonRow({
 
   return (
     <Pressable
-      disabled={disabled || loading}
+      disabled={loading}
       onPress={onPress}
       style={({ pressed }) => [
         styles.button,
         variant === "dark" && styles.buttonDark,
         variant === "ghost" && styles.buttonGhost,
-        (disabled || loading) && styles.buttonDisabled,
+        loading && styles.buttonDisabled,
         pressed && styles.buttonPressed,
       ]}
     >
@@ -213,6 +274,12 @@ const styles = StyleSheet.create({
     fontWeight: "900",
     marginBottom: 14,
   },
+  metaText: {
+    color: "#596663",
+    fontSize: 12,
+    fontWeight: "800",
+    marginBottom: 12,
+  },
   input: {
     backgroundColor: "#F8F4E3",
     borderColor: "#E3DED0",
@@ -223,6 +290,20 @@ const styles = StyleSheet.create({
     height: 50,
     marginBottom: 12,
     paddingHorizontal: 12,
+  },
+  feedbackError: {
+    color: "#B42318",
+    fontSize: 13,
+    fontWeight: "800",
+    lineHeight: 18,
+    marginBottom: 10,
+  },
+  feedbackHint: {
+    color: "#6C7774",
+    fontSize: 12,
+    fontWeight: "700",
+    lineHeight: 18,
+    marginBottom: 10,
   },
   button: {
     alignItems: "center",

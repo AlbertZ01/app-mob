@@ -1,11 +1,11 @@
 import type { Session } from "@supabase/supabase-js";
 import { Ionicons } from "@expo/vector-icons";
-import * as AuthSession from "expo-auth-session";
 import { LinearGradient } from "expo-linear-gradient";
 import { StatusBar } from "expo-status-bar";
 import * as QueryParams from "expo-auth-session/build/QueryParams";
+import * as Updates from "expo-updates";
 import * as WebBrowser from "expo-web-browser";
-import { useEffect, useMemo, useState, type ComponentProps } from "react";
+import { useCallback, useEffect, useRef, useState, type ComponentProps } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -33,7 +33,13 @@ import {
   sendLiveVote,
 } from "./src/services/api";
 import { AuthScreen } from "./src/components/AuthScreen";
-import { hasSupabaseConfig, supabase } from "./src/lib/supabase";
+import {
+  appReleaseId,
+  authRedirectUrl,
+  hasSupabaseConfig,
+  supabase,
+  supabaseProjectHost,
+} from "./src/lib/supabase";
 import type { PartyMember, PartyMode, PartyRoom, Track } from "./src/types/party";
 
 type IconName = ComponentProps<typeof Ionicons>["name"];
@@ -75,14 +81,81 @@ const LIVE_VOTES = [
   "sorpresa",
 ];
 
+function mapAuthError(error: unknown) {
+  const raw = error instanceof Error ? error.message : "No se pudo autenticar la cuenta.";
+
+  if (/email not confirmed/i.test(raw)) {
+    return "La cuenta existe, pero Supabase exige confirmar el correo. Abre el email de confirmacion o desactiva Confirm email en Supabase > Authentication > Providers > Email.";
+  }
+
+  if (/invalid login credentials/i.test(raw)) {
+    return "Correo o contrasena incorrectos.";
+  }
+
+  if (/user already registered/i.test(raw)) {
+    return "Ese correo ya tiene cuenta. Usa Entrar o recupera la contrasena.";
+  }
+
+  if (/signup is disabled/i.test(raw)) {
+    return "El registro por correo esta desactivado en Supabase. Activa Email en Authentication > Providers.";
+  }
+
+  if (/network request failed/i.test(raw)) {
+    return "La app no puede hablar con el backend o con Supabase. Revisa la conexion y vuelve a intentarlo.";
+  }
+
+  return raw;
+}
+
 export default function App() {
   const [authBusy, setAuthBusy] = useState("");
   const [authReady, setAuthReady] = useState(false);
   const [session, setSession] = useState<Session | null>(null);
-  const redirectTo = useMemo(
-    () => AuthSession.makeRedirectUri({ path: "auth/callback", scheme: "appmob" }),
-    [],
-  );
+  const lastHandledAuthUrl = useRef("");
+
+  const createSessionFromUrl = useCallback(async (url: string) => {
+    if (!supabase) {
+      throw new Error("Falta configurar Supabase en la build instalada.");
+    }
+
+    if (!url.startsWith(authRedirectUrl)) {
+      return;
+    }
+
+    if (lastHandledAuthUrl.current === url) {
+      return;
+    }
+
+    lastHandledAuthUrl.current = url;
+
+    const { errorCode, params } = QueryParams.getQueryParams(url);
+
+    if (errorCode) {
+      throw new Error(errorCode);
+    }
+
+    const accessToken = Array.isArray(params.access_token)
+      ? params.access_token[0]
+      : params.access_token;
+    const refreshToken = Array.isArray(params.refresh_token)
+      ? params.refresh_token[0]
+      : params.refresh_token;
+
+    if (!accessToken || !refreshToken) {
+      throw new Error("El proveedor no devolvio la sesion a la app.");
+    }
+
+    const { data, error } = await supabase.auth.setSession({
+      access_token: accessToken,
+      refresh_token: refreshToken,
+    });
+
+    if (error) {
+      throw error;
+    }
+
+    setSession(data.session);
+  }, []);
 
   useEffect(() => {
     if (!supabase) {
@@ -104,56 +177,83 @@ export default function App() {
     return () => subscription.unsubscribe();
   }, []);
 
+  useEffect(() => {
+    if (__DEV__ || !Updates.isEnabled) {
+      return;
+    }
+
+    let cancelled = false;
+
+    const checkForUpdates = async () => {
+      try {
+        const update = await Updates.checkForUpdateAsync();
+
+        if (!update.isAvailable || cancelled) {
+          return;
+        }
+
+        await Updates.fetchUpdateAsync();
+
+        if (cancelled) {
+          return;
+        }
+
+        Alert.alert("Actualizacion lista", "Hay una version nueva descargada. Reinicia la app para cargarla.", [
+          { text: "Luego", style: "cancel" },
+          {
+            text: "Reiniciar ahora",
+            onPress: () => {
+              void Updates.reloadAsync();
+            },
+          },
+        ]);
+      } catch {
+        // Silently ignore OTA check failures; auth and core flows should still work.
+      }
+    };
+
+    void checkForUpdates();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    const handleUrl = ({ url }: { url: string }) => {
+      void createSessionFromUrl(url).catch((error) => {
+        Alert.alert("Login", mapAuthError(error));
+      });
+    };
+
+    NativeLinking.getInitialURL()
+      .then((url) => {
+        if (url) {
+          handleUrl({ url });
+        }
+      })
+      .catch(() => undefined);
+
+    const subscription = NativeLinking.addEventListener("url", handleUrl);
+
+    return () => subscription.remove();
+  }, [createSessionFromUrl]);
+
   async function runAuth(label: string, action: () => Promise<void>) {
     setAuthBusy(label);
     try {
       await action();
     } catch (error) {
-      const message = error instanceof Error ? error.message : "No se pudo autenticar la cuenta.";
-      Alert.alert("Login", message);
+      Alert.alert("Login", mapAuthError(error));
     } finally {
       setAuthBusy("");
     }
   }
 
-  async function createSessionFromUrl(url: string) {
-    if (!supabase) {
-      throw new Error("Falta configurar Supabase en mobile/.env.");
-    }
-
-    const { errorCode, params } = QueryParams.getQueryParams(url);
-
-    if (errorCode) {
-      throw new Error(errorCode);
-    }
-
-    const accessToken = Array.isArray(params.access_token)
-      ? params.access_token[0]
-      : params.access_token;
-    const refreshToken = Array.isArray(params.refresh_token)
-      ? params.refresh_token[0]
-      : params.refresh_token;
-
-    if (!accessToken || !refreshToken) {
-      return;
-    }
-
-    const { data, error } = await supabase.auth.setSession({
-      access_token: accessToken,
-      refresh_token: refreshToken,
-    });
-
-    if (error) {
-      throw error;
-    }
-
-    setSession(data.session);
-  }
-
   async function handleEmailSignIn(email: string, password: string) {
     await runAuth("signin", async () => {
       if (!supabase) {
-        throw new Error("Falta configurar Supabase en mobile/.env.");
+        throw new Error("Falta configurar Supabase en la build instalada.");
       }
 
       const { error } = await supabase.auth.signInWithPassword({ email, password });
@@ -166,7 +266,7 @@ export default function App() {
   async function handleEmailSignUp(email: string, password: string) {
     await runAuth("signup", async () => {
       if (!supabase) {
-        throw new Error("Falta configurar Supabase en mobile/.env.");
+        throw new Error("Falta configurar Supabase en la build instalada.");
       }
 
       const { data, error } = await supabase.auth.signUp({
@@ -176,7 +276,7 @@ export default function App() {
           data: {
             display_name: email.split("@")[0] || "party friend",
           },
-          emailRedirectTo: redirectTo,
+          emailRedirectTo: authRedirectUrl,
         },
       });
 
@@ -187,7 +287,7 @@ export default function App() {
       if (!data.session) {
         Alert.alert(
           "Cuenta creada",
-          "Revisa tu correo para confirmar la cuenta y luego vuelve a iniciar sesion.",
+          "Supabase ha creado la cuenta, pero todavia no ha abierto sesion. Si tienes Confirm email activado, confirma el correo y vuelve a entrar. Si quieres entrar al instante, desactiva Confirm email en Supabase > Authentication > Providers > Email.",
         );
       }
     });
@@ -196,13 +296,13 @@ export default function App() {
   async function handleSocialSignIn(provider: AuthProvider) {
     await runAuth(provider, async () => {
       if (!supabase) {
-        throw new Error("Falta configurar Supabase en mobile/.env.");
+        throw new Error("Falta configurar Supabase en la build instalada.");
       }
 
       const { data, error } = await supabase.auth.signInWithOAuth({
         provider,
         options: {
-          redirectTo,
+          redirectTo: authRedirectUrl,
           skipBrowserRedirect: true,
         },
       });
@@ -211,7 +311,11 @@ export default function App() {
         throw error;
       }
 
-      const result = await WebBrowser.openAuthSessionAsync(data?.url ?? "", redirectTo);
+      if (!data?.url) {
+        throw new Error("Supabase no devolvio una URL valida para el proveedor.");
+      }
+
+      const result = await WebBrowser.openAuthSessionAsync(data.url, authRedirectUrl);
 
       if (result.type === "success") {
         await createSessionFromUrl(result.url);
@@ -248,10 +352,12 @@ export default function App() {
     return (
       <AuthScreen
         busy={authBusy}
+        buildReleaseId={appReleaseId}
         canUseAuth={hasSupabaseConfig}
         onSignIn={handleEmailSignIn}
         onSignUp={handleEmailSignUp}
         onSocial={handleSocialSignIn}
+        supabaseProjectHost={supabaseProjectHost}
       />
     );
   }
@@ -435,8 +541,8 @@ function PartyExperience({
           <View style={styles.brandRow}>
             <Image source={require("./assets/icon.png")} style={styles.logo} />
             <View style={styles.brandCopy}>
-              <Text style={styles.appName}>AUX Roast</Text>
-              <Text style={styles.caption}>Spotify party intelligence</Text>
+              <Text style={styles.appName}>kazp</Text>
+              <Text style={styles.caption}>group music control</Text>
             </View>
             {room ? <CodeBadge code={room.code} /> : null}
           </View>

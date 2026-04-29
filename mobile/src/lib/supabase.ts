@@ -5,8 +5,12 @@ import "react-native-url-polyfill/auto";
 
 const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL;
 const supabasePublishableKey = process.env.EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
+const buildReleaseId = process.env.EXPO_PUBLIC_APP_RELEASE_ID;
 
 export const hasSupabaseConfig = Boolean(supabaseUrl && supabasePublishableKey);
+export const authRedirectUrl = "appmob://auth/callback";
+export const appReleaseId = buildReleaseId || "local";
+export const supabaseProjectHost = supabaseUrl ? new URL(supabaseUrl).host : null;
 
 export const supabase = hasSupabaseConfig
   ? createClient(supabaseUrl, supabasePublishableKey, {

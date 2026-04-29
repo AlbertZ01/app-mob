@@ -16,7 +16,9 @@ jobs:
       run:
         working-directory: mobile
     env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
       EXPO_PUBLIC_API_BASE_URL: https://api.a-zak.com
+      EXPO_PUBLIC_APP_RELEASE_ID: run-${{ github.run_number }}
       EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY: ${{ vars.EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY || secrets.EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY }}
       EXPO_PUBLIC_SUPABASE_URL: ${{ vars.EXPO_PUBLIC_SUPABASE_URL || secrets.EXPO_PUBLIC_SUPABASE_URL }}
 
@@ -27,7 +29,7 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
           cache-dependency-path: mobile/package-lock.json
 
