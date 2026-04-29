@@ -1,13 +1,17 @@
+import type { Session } from "@supabase/supabase-js";
 import { Ionicons } from "@expo/vector-icons";
+import * as AuthSession from "expo-auth-session";
 import { LinearGradient } from "expo-linear-gradient";
 import { StatusBar } from "expo-status-bar";
+import * as QueryParams from "expo-auth-session/build/QueryParams";
+import * as WebBrowser from "expo-web-browser";
 import { useEffect, useMemo, useState, type ComponentProps } from "react";
 import {
   ActivityIndicator,
   Alert,
   Image,
   KeyboardAvoidingView,
-  Linking,
+  Linking as NativeLinking,
   Platform,
   Pressable,
   SafeAreaView,
@@ -28,10 +32,19 @@ import {
   savePlaylist,
   sendLiveVote,
 } from "./src/services/api";
+import { AuthScreen } from "./src/components/AuthScreen";
+import { hasSupabaseConfig, supabase } from "./src/lib/supabase";
 import type { PartyMember, PartyMode, PartyRoom, Track } from "./src/types/party";
 
 type IconName = ComponentProps<typeof Ionicons>["name"];
 type TabKey = "sala" | "perfiles" | "sesion" | "live" | "resumen";
+type AuthProvider = "apple" | "google";
+type AuthenticatedUser = {
+  displayName: string;
+  email: string;
+};
+
+WebBrowser.maybeCompleteAuthSession();
 
 const MODES: { id: PartyMode; label: string }[] = [
   { id: "previa", label: "Previa" },
@@ -63,15 +76,217 @@ const LIVE_VOTES = [
 ];
 
 export default function App() {
+  const [authBusy, setAuthBusy] = useState("");
+  const [authReady, setAuthReady] = useState(false);
+  const [session, setSession] = useState<Session | null>(null);
+  const redirectTo = useMemo(
+    () => AuthSession.makeRedirectUri({ path: "auth/callback", scheme: "appmob" }),
+    [],
+  );
+
+  useEffect(() => {
+    if (!supabase) {
+      setAuthReady(true);
+      return;
+    }
+
+    supabase.auth
+      .getSession()
+      .then(({ data }) => setSession(data.session))
+      .finally(() => setAuthReady(true));
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+      setSession(nextSession);
+    });
+
+    return () => subscription.unsubscribe();
+  }, []);
+
+  async function runAuth(label: string, action: () => Promise<void>) {
+    setAuthBusy(label);
+    try {
+      await action();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "No se pudo autenticar la cuenta.";
+      Alert.alert("Login", message);
+    } finally {
+      setAuthBusy("");
+    }
+  }
+
+  async function createSessionFromUrl(url: string) {
+    if (!supabase) {
+      throw new Error("Falta configurar Supabase en mobile/.env.");
+    }
+
+    const { errorCode, params } = QueryParams.getQueryParams(url);
+
+    if (errorCode) {
+      throw new Error(errorCode);
+    }
+
+    const accessToken = Array.isArray(params.access_token)
+      ? params.access_token[0]
+      : params.access_token;
+    const refreshToken = Array.isArray(params.refresh_token)
+      ? params.refresh_token[0]
+      : params.refresh_token;
+
+    if (!accessToken || !refreshToken) {
+      return;
+    }
+
+    const { data, error } = await supabase.auth.setSession({
+      access_token: accessToken,
+      refresh_token: refreshToken,
+    });
+
+    if (error) {
+      throw error;
+    }
+
+    setSession(data.session);
+  }
+
+  async function handleEmailSignIn(email: string, password: string) {
+    await runAuth("signin", async () => {
+      if (!supabase) {
+        throw new Error("Falta configurar Supabase en mobile/.env.");
+      }
+
+      const { error } = await supabase.auth.signInWithPassword({ email, password });
+      if (error) {
+        throw error;
+      }
+    });
+  }
+
+  async function handleEmailSignUp(email: string, password: string) {
+    await runAuth("signup", async () => {
+      if (!supabase) {
+        throw new Error("Falta configurar Supabase en mobile/.env.");
+      }
+
+      const { data, error } = await supabase.auth.signUp({
+        email,
+        password,
+        options: {
+          data: {
+            display_name: email.split("@")[0] || "party friend",
+          },
+          emailRedirectTo: redirectTo,
+        },
+      });
+
+      if (error) {
+        throw error;
+      }
+
+      if (!data.session) {
+        Alert.alert(
+          "Cuenta creada",
+          "Revisa tu correo para confirmar la cuenta y luego vuelve a iniciar sesion.",
+        );
+      }
+    });
+  }
+
+  async function handleSocialSignIn(provider: AuthProvider) {
+    await runAuth(provider, async () => {
+      if (!supabase) {
+        throw new Error("Falta configurar Supabase en mobile/.env.");
+      }
+
+      const { data, error } = await supabase.auth.signInWithOAuth({
+        provider,
+        options: {
+          redirectTo,
+          skipBrowserRedirect: true,
+        },
+      });
+
+      if (error) {
+        throw error;
+      }
+
+      const result = await WebBrowser.openAuthSessionAsync(data?.url ?? "", redirectTo);
+
+      if (result.type === "success") {
+        await createSessionFromUrl(result.url);
+      }
+    });
+  }
+
+  async function handleSignOut() {
+    await runAuth("signout", async () => {
+      if (!supabase) {
+        return;
+      }
+
+      const { error } = await supabase.auth.signOut();
+      if (error) {
+        throw error;
+      }
+      setSession(null);
+    });
+  }
+
+  if (!authReady) {
+    return (
+      <SafeAreaView style={styles.safeArea}>
+        <View style={styles.authLoading}>
+          <ActivityIndicator color="#D9B44A" size="large" />
+          <Text style={styles.authLoadingText}>Cargando acceso...</Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  if (!session) {
+    return (
+      <AuthScreen
+        busy={authBusy}
+        canUseAuth={hasSupabaseConfig}
+        onSignIn={handleEmailSignIn}
+        onSignUp={handleEmailSignUp}
+        onSocial={handleSocialSignIn}
+      />
+    );
+  }
+
+  return (
+    <PartyExperience
+      authenticatedUser={sessionToUser(session)}
+      onSignOut={handleSignOut}
+      signingOut={authBusy === "signout"}
+    />
+  );
+}
+
+function PartyExperience({
+  authenticatedUser,
+  onSignOut,
+  signingOut,
+}: {
+  authenticatedUser: AuthenticatedUser;
+  onSignOut: () => Promise<void>;
+  signingOut: boolean;
+}) {
   const [room, setRoom] = useState<PartyRoom | null>(null);
   const [activeTab, setActiveTab] = useState<TabKey>("sala");
   const [selectedMode, setSelectedMode] = useState<PartyMode>("previa");
-  const [displayName, setDisplayName] = useState("Alberto");
+  const [displayName, setDisplayName] = useState(authenticatedUser.displayName);
   const [joinCode, setJoinCode] = useState("");
   const [busyLabel, setBusyLabel] = useState("");
 
   const memberCount = room?.members.length || 0;
   const canUsePartyTools = memberCount > 0 && !busyLabel;
+
+  useEffect(() => {
+    setDisplayName(authenticatedUser.displayName);
+  }, [authenticatedUser.displayName]);
 
   useEffect(() => {
     if (!room?.code) {
@@ -129,7 +344,7 @@ export default function App() {
 
     await run("Abriendo Spotify", async () => {
       const login = await getSpotifyLoginUrl(room.code, displayName);
-      await Linking.openURL(login.url);
+      await NativeLinking.openURL(login.url);
       Alert.alert(
         "Spotify abierto",
         "Cuando termines el login, vuelve a la app y pulsa refrescar sala.",
@@ -205,7 +420,7 @@ export default function App() {
       const nextRoom = await getRoom(room.code);
       setRoom(nextRoom);
       Alert.alert("Playlist guardada", saved.playlistUrl);
-      await Linking.openURL(saved.playlistUrl);
+      await NativeLinking.openURL(saved.playlistUrl);
     });
   }
 
@@ -239,6 +454,21 @@ export default function App() {
                 onPress={() => setSelectedMode(mode.id)}
               />
             ))}
+          </View>
+          <View style={styles.authSessionRow}>
+            <Text numberOfLines={1} style={styles.authSessionText}>
+              {authenticatedUser.email}
+            </Text>
+            <Pressable onPress={() => void onSignOut()} style={styles.signOutButton}>
+              {signingOut ? (
+                <ActivityIndicator color="#F8F4E3" size="small" />
+              ) : (
+                <>
+                  <Ionicons color="#F8F4E3" name="log-out-outline" size={16} />
+                  <Text style={styles.signOutText}>Salir</Text>
+                </>
+              )}
+            </Pressable>
           </View>
         </LinearGradient>
 
@@ -297,6 +527,19 @@ export default function App() {
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
+}
+
+function sessionToUser(session: Session): AuthenticatedUser {
+  const displayName =
+    session.user.user_metadata?.display_name ||
+    session.user.user_metadata?.full_name ||
+    session.user.email?.split("@")[0] ||
+    "party friend";
+
+  return {
+    displayName,
+    email: session.user.email || "usuario sin correo",
+  };
 }
 
 function HomeScreen({
@@ -667,7 +910,7 @@ function TrackRow({ index, track }: { index: number; track: Track }) {
     <Pressable
       onPress={() => {
         if (track.spotifyUrl) {
-          Linking.openURL(track.spotifyUrl);
+          NativeLinking.openURL(track.spotifyUrl);
         }
       }}
       style={styles.trackRow}
@@ -816,6 +1059,17 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: "#0D1321",
   },
+  authLoading: {
+    alignItems: "center",
+    flex: 1,
+    justifyContent: "center",
+  },
+  authLoadingText: {
+    color: "#F8F4E3",
+    fontSize: 15,
+    fontWeight: "800",
+    marginTop: 12,
+  },
   screen: {
     flex: 1,
     backgroundColor: "#F8F4E3",
@@ -860,6 +1114,36 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     flexWrap: "wrap",
     gap: 8,
+  },
+  authSessionRow: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: 10,
+    marginTop: 14,
+  },
+  authSessionText: {
+    color: "#D8E3E0",
+    flex: 1,
+    fontSize: 12,
+    fontWeight: "800",
+  },
+  signOutButton: {
+    alignItems: "center",
+    backgroundColor: "rgba(255,255,255,0.12)",
+    borderColor: "rgba(255,255,255,0.16)",
+    borderRadius: 8,
+    borderWidth: 1,
+    flexDirection: "row",
+    gap: 6,
+    height: 34,
+    justifyContent: "center",
+    minWidth: 78,
+    paddingHorizontal: 10,
+  },
+  signOutText: {
+    color: "#F8F4E3",
+    fontSize: 12,
+    fontWeight: "900",
   },
   pill: {
     backgroundColor: "rgba(255,255,255,0.12)",

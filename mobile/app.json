@@ -4,6 +4,7 @@
     "slug": "app-mob",
     "version": "0.1.0",
     "orientation": "portrait",
+    "description": "Party app that reads the group's Spotify taste, generates roasts and builds a live playlist.",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
     "scheme": "appmob",
@@ -12,15 +13,30 @@
     ],
     "android": {
       "package": "com.albertz01.appmob",
+      "versionCode": 1,
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#0D1321"
       }
     },
+    "ios": {
+      "bundleIdentifier": "com.albertz01.appmob",
+      "buildNumber": "1",
+      "supportsTablet": false
+    },
     "splash": {
       "image": "./assets/splash.png",
       "resizeMode": "contain",
       "backgroundColor": "#0D1321"
-    }
+    },
+    "extra": {
+      "eas": {
+        "projectId": "ac34996a-8275-461a-a05d-8daf9fc9f2dd"
+      }
+    },
+    "plugins": [
+      "expo-font",
+      "expo-web-browser"
+    ]
   }
 }

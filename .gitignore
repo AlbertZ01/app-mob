@@ -3,6 +3,8 @@ node_modules/
 .env.*
 !.env.example
 .expo/
+android/
+ios/
 dist/
 build/
 coverage/
@@ -11,4 +13,3 @@ yarn-debug.log*
 yarn-error.log*
 *.apk
 *.aab
-

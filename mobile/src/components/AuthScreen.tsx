@@ -1,0 +1,294 @@
+import { Ionicons } from "@expo/vector-icons";
+import { LinearGradient } from "expo-linear-gradient";
+import { useState } from "react";
+import {
+  ActivityIndicator,
+  Pressable,
+  SafeAreaView,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from "react-native";
+
+type Provider = "apple" | "google";
+
+export function AuthScreen({
+  busy,
+  canUseAuth,
+  onSignIn,
+  onSignUp,
+  onSocial,
+}: {
+  busy: string;
+  canUseAuth: boolean;
+  onSignIn: (email: string, password: string) => Promise<void>;
+  onSignUp: (email: string, password: string) => Promise<void>;
+  onSocial: (provider: Provider) => Promise<void>;
+}) {
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+
+  const disabled = !canUseAuth || email.trim().length < 5 || password.trim().length < 6;
+
+  return (
+    <SafeAreaView style={styles.safeArea}>
+      <LinearGradient colors={["#0D1321", "#1D7874"]} style={styles.header}>
+        <Text style={styles.title}>AUX Roast</Text>
+        <Text style={styles.subtitle}>
+          Antes de entrar en la fiesta, cada persona necesita cuenta propia.
+        </Text>
+      </LinearGradient>
+
+      <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>Inicia sesion</Text>
+          <TextInput
+            autoCapitalize="none"
+            keyboardType="email-address"
+            onChangeText={setEmail}
+            placeholder="correo@ejemplo.com"
+            placeholderTextColor="#6C7774"
+            style={styles.input}
+            value={email}
+          />
+          <TextInput
+            autoCapitalize="none"
+            onChangeText={setPassword}
+            placeholder="Contrasena"
+            placeholderTextColor="#6C7774"
+            secureTextEntry
+            style={styles.input}
+            value={password}
+          />
+
+          <ButtonRow
+            busy={busy}
+            disabled={disabled}
+            label="Entrar"
+            loadingKey="signin"
+            onPress={() => onSignIn(email.trim(), password)}
+          />
+          <ButtonRow
+            busy={busy}
+            disabled={disabled}
+            label="Crear cuenta"
+            loadingKey="signup"
+            onPress={() => onSignUp(email.trim(), password)}
+            variant="ghost"
+          />
+
+          <Separator label="o sigue con" />
+
+          <ButtonRow
+            busy={busy}
+            disabled={!canUseAuth}
+            icon="logo-google"
+            label="Google"
+            loadingKey="google"
+            onPress={() => onSocial("google")}
+          />
+          <ButtonRow
+            busy={busy}
+            disabled={!canUseAuth}
+            icon="logo-apple"
+            label="Apple"
+            loadingKey="apple"
+            onPress={() => onSocial("apple")}
+            variant="dark"
+          />
+        </View>
+
+        <View style={styles.noteCard}>
+          <Text style={styles.noteTitle}>Configuracion necesaria</Text>
+          <Text style={styles.noteText}>
+            Esta version exige autenticacion. Configura `EXPO_PUBLIC_SUPABASE_URL` y
+            `EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY` en `mobile/.env`.
+          </Text>
+          <Text style={styles.noteText}>
+            En Supabase, anade `appmob://auth/callback` como Redirect URL para Google y Apple.
+          </Text>
+        </View>
+      </ScrollView>
+    </SafeAreaView>
+  );
+}
+
+function Separator({ label }: { label: string }) {
+  return (
+    <View style={styles.separatorRow}>
+      <View style={styles.separatorLine} />
+      <Text style={styles.separatorLabel}>{label}</Text>
+      <View style={styles.separatorLine} />
+    </View>
+  );
+}
+
+function ButtonRow({
+  busy,
+  disabled,
+  icon,
+  label,
+  loadingKey,
+  onPress,
+  variant = "primary",
+}: {
+  busy: string;
+  disabled: boolean;
+  icon?: keyof typeof Ionicons.glyphMap;
+  label: string;
+  loadingKey: string;
+  onPress: () => void;
+  variant?: "dark" | "ghost" | "primary";
+}) {
+  const loading = busy === loadingKey;
+
+  return (
+    <Pressable
+      disabled={disabled || loading}
+      onPress={onPress}
+      style={({ pressed }) => [
+        styles.button,
+        variant === "dark" && styles.buttonDark,
+        variant === "ghost" && styles.buttonGhost,
+        (disabled || loading) && styles.buttonDisabled,
+        pressed && styles.buttonPressed,
+      ]}
+    >
+      {loading ? (
+        <ActivityIndicator color={variant === "dark" ? "#F8F4E3" : "#0D1321"} />
+      ) : (
+        <>
+          {icon ? (
+            <Ionicons
+              color={variant === "dark" ? "#F8F4E3" : "#0D1321"}
+              name={icon}
+              size={18}
+            />
+          ) : null}
+          <Text style={[styles.buttonText, variant === "dark" && styles.buttonTextDark]}>
+            {label}
+          </Text>
+        </>
+      )}
+    </Pressable>
+  );
+}
+
+const styles = StyleSheet.create({
+  safeArea: {
+    flex: 1,
+    backgroundColor: "#0D1321",
+  },
+  header: {
+    paddingHorizontal: 20,
+    paddingTop: 28,
+    paddingBottom: 24,
+  },
+  title: {
+    color: "#FFFFFF",
+    fontSize: 32,
+    fontWeight: "900",
+  },
+  subtitle: {
+    color: "#D8E3E0",
+    fontSize: 15,
+    lineHeight: 22,
+    marginTop: 10,
+    maxWidth: 420,
+  },
+  content: {
+    padding: 18,
+    paddingBottom: 34,
+  },
+  card: {
+    backgroundColor: "#FFFFFF",
+    borderRadius: 8,
+    padding: 18,
+  },
+  cardTitle: {
+    color: "#0D1321",
+    fontSize: 22,
+    fontWeight: "900",
+    marginBottom: 14,
+  },
+  input: {
+    backgroundColor: "#F8F4E3",
+    borderColor: "#E3DED0",
+    borderRadius: 8,
+    borderWidth: 1,
+    color: "#0D1321",
+    fontSize: 16,
+    height: 50,
+    marginBottom: 12,
+    paddingHorizontal: 12,
+  },
+  button: {
+    alignItems: "center",
+    backgroundColor: "#D9B44A",
+    borderRadius: 8,
+    flexDirection: "row",
+    gap: 8,
+    height: 48,
+    justifyContent: "center",
+    marginBottom: 10,
+  },
+  buttonDark: {
+    backgroundColor: "#0D1321",
+  },
+  buttonGhost: {
+    backgroundColor: "#FFFFFF",
+    borderColor: "#E3DED0",
+    borderWidth: 1,
+  },
+  buttonDisabled: {
+    opacity: 0.55,
+  },
+  buttonPressed: {
+    transform: [{ scale: 0.99 }],
+  },
+  buttonText: {
+    color: "#0D1321",
+    fontSize: 15,
+    fontWeight: "900",
+  },
+  buttonTextDark: {
+    color: "#F8F4E3",
+  },
+  separatorRow: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: 10,
+    marginVertical: 12,
+  },
+  separatorLine: {
+    backgroundColor: "#E3DED0",
+    flex: 1,
+    height: 1,
+  },
+  separatorLabel: {
+    color: "#6C7774",
+    fontSize: 12,
+    fontWeight: "800",
+    textTransform: "uppercase",
+  },
+  noteCard: {
+    backgroundColor: "#13213A",
+    borderRadius: 8,
+    marginTop: 14,
+    padding: 16,
+  },
+  noteTitle: {
+    color: "#FFFFFF",
+    fontSize: 16,
+    fontWeight: "900",
+    marginBottom: 8,
+  },
+  noteText: {
+    color: "#D8E3E0",
+    fontSize: 13,
+    lineHeight: 20,
+    marginBottom: 8,
+  },
+});
