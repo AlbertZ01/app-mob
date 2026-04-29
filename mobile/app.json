@@ -15,7 +15,10 @@
     "updates": {
       "url": "https://u.expo.dev/ac34996a-8275-461a-a05d-8daf9fc9f2dd",
       "checkAutomatically": "ON_LOAD",
-      "fallbackToCacheTimeout": 0
+      "fallbackToCacheTimeout": 0,
+      "requestHeaders": {
+        "expo-channel-name": "production"
+      }
     },
     "assetBundlePatterns": [
       "**/*"

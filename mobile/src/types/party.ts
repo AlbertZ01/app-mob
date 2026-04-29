@@ -116,5 +116,7 @@ export type SpotifyLoginResponse = {
 
 export type SavePlaylistResponse = {
   playlistId: string;
+  playlistName: string;
   playlistUrl: string;
+  trackCount: number;
 };

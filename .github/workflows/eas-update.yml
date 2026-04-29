@@ -1,0 +1,59 @@
+name: EAS Update
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - "mobile/**"
+      - ".github/workflows/eas-update.yml"
+
+jobs:
+  publish-production-update:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: mobile
+    env:
+      EXPO_PUBLIC_API_BASE_URL: https://api.a-zak.com
+      EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY: ${{ vars.EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY || secrets.EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY }}
+      EXPO_PUBLIC_SUPABASE_URL: ${{ vars.EXPO_PUBLIC_SUPABASE_URL || secrets.EXPO_PUBLIC_SUPABASE_URL }}
+
+    steps:
+      - name: Check for EXPO_TOKEN
+        id: expo-token
+        run: |
+          if [ -z "${{ secrets.EXPO_TOKEN }}" ]; then
+            echo "::warning::EXPO_TOKEN no esta configurado en GitHub. Se omite la OTA."
+            echo "present=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Checkout
+        if: steps.expo-token.outputs.present == 'true'
+        uses: actions/checkout@v5
+
+      - name: Setup Node
+        if: steps.expo-token.outputs.present == 'true'
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+
+      - name: Setup Expo and EAS
+        if: steps.expo-token.outputs.present == 'true'
+        uses: expo/expo-github-action@v8
+        with:
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+
+      - name: Install dependencies
+        if: steps.expo-token.outputs.present == 'true'
+        run: npm ci
+
+      - name: Publish production update
+        if: steps.expo-token.outputs.present == 'true'
+        run: npx eas-cli@latest update --channel production --message "main ${GITHUB_SHA}" --non-interactive

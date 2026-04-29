@@ -717,45 +717,99 @@ async function spotifyGet(accessToken, path) {
   return response.json();
 }
 
+async function refreshSpotifyAccessToken(member) {
+  if (!member.refreshToken) {
+    throw new ApiError(401, "La sesion de Spotify ha caducado. Vuelve a conectar Spotify.");
+  }
+
+  const response = await fetch("https://accounts.spotify.com/api/token", {
+    body: new URLSearchParams({
+      client_id: process.env.SPOTIFY_CLIENT_ID,
+      grant_type: "refresh_token",
+      refresh_token: member.refreshToken,
+    }),
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded",
+    },
+    method: "POST",
+  });
+
+  if (!response.ok) {
+    const body = await response.text();
+    throw new ApiError(502, `Spotify token refresh failed: ${response.status} ${body}`);
+  }
+
+  const token = await response.json();
+  member.accessToken = token.access_token;
+  member.refreshToken = token.refresh_token || member.refreshToken;
+  member.tokenExpiresAt = Date.now() + Number(token.expires_in || 3600) * 1000;
+}
+
+async function spotifyMemberRequest(member, url, init = {}, retry = true) {
+  if (!member.accessToken) {
+    throw new ApiError(400, "Conecta Spotify con un usuario real antes de guardar playlists.");
+  }
+
+  if (member.tokenExpiresAt && member.tokenExpiresAt <= Date.now() + 60_000) {
+    await refreshSpotifyAccessToken(member);
+  }
+
+  const response = await fetch(url, {
+    ...init,
+    headers: {
+      Authorization: `Bearer ${member.accessToken}`,
+      ...(init.headers || {}),
+    },
+  });
+
+  if (response.status === 401 && retry && member.refreshToken) {
+    await refreshSpotifyAccessToken(member);
+    return spotifyMemberRequest(member, url, init, false);
+  }
+
+  return response;
+}
+
 async function createSpotifyPlaylist(member, room, uris) {
-  const response = await fetch("https://api.spotify.com/v1/me/playlists", {
+  const playlistName = `Sala ${room.code}`;
+  const response = await spotifyMemberRequest(member, "https://api.spotify.com/v1/me/playlists", {
     body: JSON.stringify({
-      description: `Playlist creada por AUX Roast para la sala ${room.code}.`,
-      name: `${room.mode.replaceAll("_", " ")} - AUX Roast ${room.code}`,
+      description: `Playlist creada por kazp para la sala ${room.code}.`,
+      name: playlistName,
       public: false,
     }),
     headers: {
-      Authorization: `Bearer ${member.accessToken}`,
       "Content-Type": "application/json",
     },
     method: "POST",
   });
 
   if (!response.ok) {
-    throw new ApiError(502, `Spotify playlist create failed: ${response.status}`);
+    throw new ApiError(502, `Spotify playlist create failed: ${response.status} ${await response.text()}`);
   }
 
   const playlist = await response.json();
 
   for (let index = 0; index < uris.length; index += 100) {
     const chunk = uris.slice(index, index + 100);
-    const addResponse = await fetch(`https://api.spotify.com/v1/playlists/${playlist.id}/tracks`, {
+    const addResponse = await spotifyMemberRequest(member, `https://api.spotify.com/v1/playlists/${playlist.id}/tracks`, {
       body: JSON.stringify({ uris: chunk }),
       headers: {
-        Authorization: `Bearer ${member.accessToken}`,
         "Content-Type": "application/json",
       },
       method: "POST",
     });
 
     if (!addResponse.ok) {
-      throw new ApiError(502, `Spotify playlist add failed: ${addResponse.status}`);
+      throw new ApiError(502, `Spotify playlist add failed: ${addResponse.status} ${await addResponse.text()}`);
     }
   }
 
   return {
     playlistId: playlist.id,
+    playlistName,
     playlistUrl: playlist.external_urls?.spotify || "",
+    trackCount: uris.length,
   };
 }
 

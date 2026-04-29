@@ -8,6 +8,7 @@ import * as WebBrowser from "expo-web-browser";
 import { useCallback, useEffect, useRef, useState, type ComponentProps } from "react";
 import {
   ActivityIndicator,
+  AppState,
   Alert,
   Image,
   KeyboardAvoidingView,
@@ -21,6 +22,7 @@ import {
   TextInput,
   View,
 } from "react-native";
+import { SafeAreaProvider, useSafeAreaInsets } from "react-native-safe-area-context";
 
 import {
   addDemoFriend,
@@ -49,6 +51,7 @@ type AuthenticatedUser = {
   displayName: string;
   email: string;
 };
+type UpdateState = "checking" | "downloading" | "idle" | "ready";
 
 WebBrowser.maybeCompleteAuthSession();
 
@@ -110,8 +113,12 @@ function mapAuthError(error: unknown) {
 export default function App() {
   const [authBusy, setAuthBusy] = useState("");
   const [authReady, setAuthReady] = useState(false);
+  const [isUpdateAvailable, setIsUpdateAvailable] = useState(false);
   const [session, setSession] = useState<Session | null>(null);
+  const [updateError, setUpdateError] = useState("");
+  const [updateState, setUpdateState] = useState<UpdateState>("idle");
   const lastHandledAuthUrl = useRef("");
+  const updateCheckInFlight = useRef(false);
 
   const createSessionFromUrl = useCallback(async (url: string) => {
     if (!supabase) {
@@ -177,47 +184,57 @@ export default function App() {
     return () => subscription.unsubscribe();
   }, []);
 
+  const checkForUpdates = useCallback(async () => {
+    if (__DEV__ || !Updates.isEnabled || updateCheckInFlight.current) {
+      return;
+    }
+
+    updateCheckInFlight.current = true;
+
+    try {
+      setUpdateState("checking");
+      setUpdateError("");
+      const update = await Updates.checkForUpdateAsync();
+
+      setIsUpdateAvailable(update.isAvailable);
+      setUpdateState(update.isAvailable ? "ready" : "idle");
+    } catch (error) {
+      setIsUpdateAvailable(false);
+      setUpdateState("idle");
+      setUpdateError(error instanceof Error ? error.message : "No se pudo buscar una actualizacion.");
+    } finally {
+      updateCheckInFlight.current = false;
+    }
+  }, []);
+
   useEffect(() => {
+    void checkForUpdates();
+
+    const subscription = AppState.addEventListener("change", (nextState) => {
+      if (nextState === "active") {
+        void checkForUpdates();
+      }
+    });
+
+    return () => subscription.remove();
+  }, [checkForUpdates]);
+
+  async function handleApplyUpdate() {
     if (__DEV__ || !Updates.isEnabled) {
       return;
     }
 
-    let cancelled = false;
+    setUpdateState("downloading");
+    setUpdateError("");
 
-    const checkForUpdates = async () => {
-      try {
-        const update = await Updates.checkForUpdateAsync();
-
-        if (!update.isAvailable || cancelled) {
-          return;
-        }
-
-        await Updates.fetchUpdateAsync();
-
-        if (cancelled) {
-          return;
-        }
-
-        Alert.alert("Actualizacion lista", "Hay una version nueva descargada. Reinicia la app para cargarla.", [
-          { text: "Luego", style: "cancel" },
-          {
-            text: "Reiniciar ahora",
-            onPress: () => {
-              void Updates.reloadAsync();
-            },
-          },
-        ]);
-      } catch {
-        // Silently ignore OTA check failures; auth and core flows should still work.
-      }
-    };
-
-    void checkForUpdates();
-
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+    try {
+      await Updates.fetchUpdateAsync();
+      await Updates.reloadAsync();
+    } catch (error) {
+      setUpdateState("ready");
+      setUpdateError(error instanceof Error ? error.message : "No se pudo aplicar la actualizacion.");
+    }
+  }
 
   useEffect(() => {
     const handleUrl = ({ url }: { url: string }) => {
@@ -339,47 +356,66 @@ export default function App() {
 
   if (!authReady) {
     return (
-      <SafeAreaView style={styles.safeArea}>
-        <View style={styles.authLoading}>
-          <ActivityIndicator color="#D9B44A" size="large" />
-          <Text style={styles.authLoadingText}>Cargando acceso...</Text>
-        </View>
-      </SafeAreaView>
+      <SafeAreaProvider>
+        <SafeAreaView style={styles.safeArea}>
+          <View style={styles.authLoading}>
+            <ActivityIndicator color="#D9B44A" size="large" />
+            <Text style={styles.authLoadingText}>Cargando acceso...</Text>
+          </View>
+        </SafeAreaView>
+      </SafeAreaProvider>
     );
   }
 
   if (!session) {
     return (
-      <AuthScreen
-        busy={authBusy}
-        buildReleaseId={appReleaseId}
-        canUseAuth={hasSupabaseConfig}
-        onSignIn={handleEmailSignIn}
-        onSignUp={handleEmailSignUp}
-        onSocial={handleSocialSignIn}
-        supabaseProjectHost={supabaseProjectHost}
-      />
+      <SafeAreaProvider>
+        <AuthScreen
+          busy={authBusy}
+          buildReleaseId={appReleaseId}
+          canUseAuth={hasSupabaseConfig}
+          onSignIn={handleEmailSignIn}
+          onSignUp={handleEmailSignUp}
+          onSocial={handleSocialSignIn}
+          supabaseProjectHost={supabaseProjectHost}
+        />
+      </SafeAreaProvider>
     );
   }
 
   return (
-    <PartyExperience
-      authenticatedUser={sessionToUser(session)}
-      onSignOut={handleSignOut}
-      signingOut={authBusy === "signout"}
-    />
+    <SafeAreaProvider>
+      <PartyExperience
+        authenticatedUser={sessionToUser(session)}
+        isUpdateAvailable={isUpdateAvailable}
+        onSignOut={handleSignOut}
+        onUpdatePress={handleApplyUpdate}
+        signingOut={authBusy === "signout"}
+        updateError={updateError}
+        updateState={updateState}
+      />
+    </SafeAreaProvider>
   );
 }
 
 function PartyExperience({
   authenticatedUser,
+  isUpdateAvailable,
   onSignOut,
+  onUpdatePress,
   signingOut,
+  updateError,
+  updateState,
 }: {
   authenticatedUser: AuthenticatedUser;
+  isUpdateAvailable: boolean;
   onSignOut: () => Promise<void>;
+  onUpdatePress: () => Promise<void>;
   signingOut: boolean;
+  updateError: string;
+  updateState: UpdateState;
 }) {
+  const insets = useSafeAreaInsets();
   const [room, setRoom] = useState<PartyRoom | null>(null);
   const [activeTab, setActiveTab] = useState<TabKey>("sala");
   const [selectedMode, setSelectedMode] = useState<PartyMode>("previa");
@@ -525,8 +561,13 @@ function PartyExperience({
       const saved = await savePlaylist(room.code);
       const nextRoom = await getRoom(room.code);
       setRoom(nextRoom);
-      Alert.alert("Playlist guardada", saved.playlistUrl);
-      await NativeLinking.openURL(saved.playlistUrl);
+      Alert.alert(
+        "Playlist guardada",
+        `${saved.playlistName} (${saved.trackCount} canciones)`,
+      );
+      if (saved.playlistUrl) {
+        await NativeLinking.openURL(saved.playlistUrl);
+      }
     });
   }
 
@@ -537,7 +578,10 @@ function PartyExperience({
         behavior={Platform.select({ ios: "padding", android: undefined })}
         style={styles.screen}
       >
-        <LinearGradient colors={["#0D1321", "#1D7874"]} style={styles.header}>
+        <LinearGradient
+          colors={["#0D1321", "#1D7874"]}
+          style={[styles.header, { paddingTop: Math.max(insets.top + 18, 34) }]}
+        >
           <View style={styles.brandRow}>
             <Image source={require("./assets/icon.png")} style={styles.logo} />
             <View style={styles.brandCopy}>
@@ -577,6 +621,14 @@ function PartyExperience({
             </Pressable>
           </View>
         </LinearGradient>
+
+        {isUpdateAvailable ? (
+          <UpdateBanner
+            busy={updateState === "checking" || updateState === "downloading"}
+            error={updateError}
+            onPress={() => void onUpdatePress()}
+          />
+        ) : null}
 
         {room ? (
           <>
@@ -1096,6 +1148,33 @@ function TabBar({ activeTab, onChange }: { activeTab: TabKey; onChange: (tab: Ta
   );
 }
 
+function UpdateBanner({
+  busy,
+  error,
+  onPress,
+}: {
+  busy: boolean;
+  error: string;
+  onPress: () => void;
+}) {
+  return (
+    <View style={styles.updateBanner}>
+      <View style={styles.updateBannerCopy}>
+        <Text style={styles.updateBannerTitle}>Nueva version disponible</Text>
+        <Text style={styles.updateBannerText}>
+          {busy
+            ? "Descargando cambios y preparando el reinicio..."
+            : "Descarga la actualizacion y aplicala ahora mismo."}
+        </Text>
+        {error ? <Text style={styles.updateBannerError}>{error}</Text> : null}
+      </View>
+      <Pressable disabled={busy} onPress={onPress} style={[styles.updateButton, busy && styles.buttonDisabled]}>
+        {busy ? <ActivityIndicator color="#0D1321" /> : <Text style={styles.updateButtonText}>Actualizar</Text>}
+      </Pressable>
+    </View>
+  );
+}
+
 function CodeBadge({ code }: { code: string }) {
   return (
     <View style={styles.codeBadge}>
@@ -1189,7 +1268,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     flexDirection: "row",
     gap: 10,
-    marginBottom: 20,
+    marginBottom: 18,
   },
   brandCopy: {
     flex: 1,
@@ -1279,6 +1358,51 @@ const styles = StyleSheet.create({
     justifyContent: "space-around",
     paddingHorizontal: 6,
     paddingVertical: 8,
+  },
+  updateBanner: {
+    alignItems: "center",
+    backgroundColor: "#E8FFF4",
+    borderBottomColor: "#B6E8D0",
+    borderBottomWidth: 1,
+    flexDirection: "row",
+    gap: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+  },
+  updateBannerCopy: {
+    flex: 1,
+  },
+  updateBannerTitle: {
+    color: "#0D1321",
+    fontSize: 14,
+    fontWeight: "900",
+  },
+  updateBannerText: {
+    color: "#285145",
+    fontSize: 12,
+    lineHeight: 18,
+    marginTop: 2,
+  },
+  updateBannerError: {
+    color: "#B42318",
+    fontSize: 12,
+    fontWeight: "700",
+    lineHeight: 18,
+    marginTop: 4,
+  },
+  updateButton: {
+    alignItems: "center",
+    backgroundColor: "#D9B44A",
+    borderRadius: 8,
+    height: 38,
+    justifyContent: "center",
+    minWidth: 102,
+    paddingHorizontal: 14,
+  },
+  updateButtonText: {
+    color: "#0D1321",
+    fontSize: 13,
+    fontWeight: "900",
   },
   tabButton: {
     alignItems: "center",

@@ -16,13 +16,30 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
     },
   });
 
-  const payload = await response.json();
+  const contentType = response.headers.get("content-type") || "";
+  const raw = await response.text();
+  const isJson = contentType.includes("application/json");
+  const payload = raw && isJson ? JSON.parse(raw) : null;
 
   if (!response.ok) {
-    throw new Error(payload.error || "La API no pudo completar la accion.");
+    if (payload && typeof payload === "object" && "error" in payload) {
+      throw new Error(String(payload.error));
+    }
+
+    if (!isJson) {
+      throw new Error(
+        `El servidor devolvio ${response.status} ${response.statusText} en formato no JSON. Revisa el backend o Cloudflare.`,
+      );
+    }
+
+    throw new Error("La API no pudo completar la accion.");
   }
 
-  return payload;
+  if (!payload) {
+    throw new Error("La API respondio sin JSON.");
+  }
+
+  return payload as T;
 }
 
 export function createRoom(mode: PartyMode, hostName: string): Promise<PartyRoom> {
