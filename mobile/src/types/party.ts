@@ -102,6 +102,7 @@ export type PartySummary = {
 
 export type PartyRoom = {
   code: string;
+  name: string;
   mode: PartyMode;
   members: PartyMember[];
   scores: GroupScores;

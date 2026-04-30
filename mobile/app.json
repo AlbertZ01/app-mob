@@ -10,7 +10,7 @@
     "description": "kazp analyzes the group's Spotify taste, signs users in and keeps the party session updated live.",
     "icon": "./assets/icon.png",
     "newArchEnabled": false,
-    "userInterfaceStyle": "light",
+    "userInterfaceStyle": "dark",
     "scheme": "appmob",
     "updates": {
       "url": "https://u.expo.dev/ac34996a-8275-461a-a05d-8daf9fc9f2dd",
@@ -28,7 +28,7 @@
       "versionCode": 1,
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
-        "backgroundColor": "#0D1321"
+        "backgroundColor": "#07110D"
       }
     },
     "ios": {
@@ -39,7 +39,7 @@
     "splash": {
       "image": "./assets/splash.png",
       "resizeMode": "contain",
-      "backgroundColor": "#0D1321"
+      "backgroundColor": "#07110D"
     },
     "extra": {
       "eas": {

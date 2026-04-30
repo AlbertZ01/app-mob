@@ -48,9 +48,11 @@ type TabKey = "sala" | "perfiles" | "sesion" | "live" | "resumen" | "perfil";
 type AuthProvider = "apple" | "google";
 type AuthenticatedUser = {
   avatarUrl: string;
+  favoriteMode: PartyMode;
   id: string;
   displayName: string;
   email: string;
+  tagline: string;
 };
 type UpdateState = "checking" | "downloading" | "idle" | "ready";
 
@@ -85,6 +87,22 @@ const LIVE_VOTES = [
   "sube esto ya",
   "sorpresa",
 ];
+
+const THEME = {
+  accent: "#A7E3BE",
+  accentDeep: "#7FC99D",
+  accentSoft: "#1E3B31",
+  background: "#07110D",
+  border: "#27483B",
+  danger: "#FF7A97",
+  input: "#0D1713",
+  muted: "#9CB8AD",
+  mutedSoft: "#71897F",
+  panel: "#0F1D18",
+  panelRaised: "#142720",
+  panelSoft: "#183229",
+  text: "#F2FFF7",
+};
 
 function mapAuthError(error: unknown) {
   const raw = error instanceof Error ? error.message : "No se pudo autenticar la cuenta.";
@@ -369,7 +387,7 @@ export default function App() {
       <SafeAreaProvider>
         <SafeAreaView style={styles.safeArea}>
           <View style={styles.authLoading}>
-            <ActivityIndicator color="#D9B44A" size="large" />
+            <ActivityIndicator color={THEME.accent} size="large" />
             <Text style={styles.authLoadingText}>Cargando acceso...</Text>
           </View>
         </SafeAreaView>
@@ -399,7 +417,7 @@ export default function App() {
         onCheckUpdates={checkForUpdates}
         onConsumeInvite={() => setPendingInviteCode("")}
         pendingInviteCode={pendingInviteCode}
-        onProfileUpdated={async (displayName, avatarUrl) => {
+        onProfileUpdated={async (profile) => {
           await runAuth("profile", async () => {
             if (!supabase) {
               throw new Error("Falta configurar Supabase en la build instalada.");
@@ -407,8 +425,10 @@ export default function App() {
 
             const { error } = await supabase.auth.updateUser({
               data: {
-                avatar_url: avatarUrl,
-                display_name: displayName,
+                avatar_url: profile.avatarUrl,
+                display_name: profile.displayName,
+                favorite_mode: profile.favoriteMode,
+                tagline: profile.tagline,
               },
             });
 
@@ -449,7 +469,12 @@ function PartyExperience({
   isUpdateAvailable: boolean;
   onCheckUpdates: () => Promise<void>;
   onConsumeInvite: () => void;
-  onProfileUpdated: (displayName: string, avatarUrl: string) => Promise<void>;
+  onProfileUpdated: (profile: {
+    avatarUrl: string;
+    displayName: string;
+    favoriteMode: PartyMode;
+    tagline: string;
+  }) => Promise<void>;
   onSignOut: () => Promise<void>;
   onUpdatePress: () => Promise<void>;
   pendingInviteCode: string;
@@ -462,10 +487,13 @@ function PartyExperience({
   const [room, setRoom] = useState<PartyRoom | null>(null);
   const [activeTab, setActiveTab] = useState<TabKey>("sala");
   const [homeTab, setHomeTab] = useState<"inicio" | "perfil">("inicio");
-  const [selectedMode, setSelectedMode] = useState<PartyMode>("previa");
+  const [selectedMode, setSelectedMode] = useState<PartyMode>(authenticatedUser.favoriteMode);
   const [displayName, setDisplayName] = useState(authenticatedUser.displayName);
+  const [roomName, setRoomName] = useState("La previa");
+  const [profileFavoriteMode, setProfileFavoriteMode] = useState<PartyMode>(authenticatedUser.favoriteMode);
   const [profileName, setProfileName] = useState(authenticatedUser.displayName);
   const [profilePhotoUrl, setProfilePhotoUrl] = useState(authenticatedUser.avatarUrl);
+  const [profileTagline, setProfileTagline] = useState(authenticatedUser.tagline);
   const [joinCode, setJoinCode] = useState("");
   const [busyLabel, setBusyLabel] = useState("");
 
@@ -479,7 +507,9 @@ function PartyExperience({
     setDisplayName(authenticatedUser.displayName);
     setProfileName(authenticatedUser.displayName);
     setProfilePhotoUrl(authenticatedUser.avatarUrl);
-  }, [authenticatedUser.displayName]);
+    setProfileFavoriteMode(authenticatedUser.favoriteMode);
+    setProfileTagline(authenticatedUser.tagline);
+  }, [authenticatedUser.avatarUrl, authenticatedUser.displayName, authenticatedUser.favoriteMode, authenticatedUser.tagline]);
 
   useEffect(() => {
     setProfilePhotoUrl(authenticatedUser.avatarUrl);
@@ -556,6 +586,7 @@ function PartyExperience({
         selectedMode,
         profileName.trim() || displayName,
         authenticatedUser.id,
+        roomName.trim() || `Sala ${profileName.trim() || displayName}`,
         profilePhotoUrl,
       );
       setRoom(nextRoom);
@@ -618,8 +649,8 @@ function PartyExperience({
     }
 
     await Share.share({
-      message: `Unete a mi sala ${room.code} en kazp.\n\nAbre este enlace en el movil donde tengas la app instalada:\nappmob://join?roomCode=${room.code}\n\nSi tu app no se abre sola, entra manualmente con el codigo ${room.code}.`,
-      title: `Invitacion a la sala ${room.code}`,
+      message: `Unete a ${room.name || room.code} en kazp.\n\nAbre este enlace en el movil donde tengas la app instalada:\nappmob://join?roomCode=${room.code}\n\nSi tu app no se abre sola, entra manualmente con el codigo ${room.code}.`,
+      title: `Invitacion a ${room.name || room.code}`,
       url: `appmob://join?roomCode=${room.code}`,
     });
   }
@@ -695,7 +726,7 @@ function PartyExperience({
         style={styles.screen}
       >
         <LinearGradient
-          colors={["#0D1321", "#1D7874"]}
+          colors={["#07110D", "#163429", "#245847"]}
           style={[styles.header, { paddingTop: Math.max(insets.top + 18, 34) }]}
         >
           <View style={styles.brandRow}>
@@ -729,10 +760,10 @@ function PartyExperience({
             </Text>
             <Pressable onPress={() => void onSignOut()} style={styles.signOutButton}>
               {signingOut ? (
-                <ActivityIndicator color="#F8F4E3" size="small" />
+                <ActivityIndicator color={THEME.text} size="small" />
               ) : (
                 <>
-                  <Ionicons color="#F8F4E3" name="log-out-outline" size={16} />
+                  <Ionicons color={THEME.text} name="log-out-outline" size={16} />
                   <Text style={styles.signOutText}>Salir</Text>
                 </>
               )}
@@ -773,6 +804,7 @@ function PartyExperience({
                   onSavePlaylist={handleSavePlaylist}
                   playlist={room.playlist}
                   roomCode={room.code}
+                  roomName={room.name}
                 />
               ) : null}
               {activeTab === "live" ? (
@@ -794,21 +826,27 @@ function PartyExperience({
                   onCheckUpdates={onCheckUpdates}
                   onConnectSpotify={handleConnectSpotify}
                   onProfileSave={() =>
-                    void onProfileUpdated(
-                      profileName.trim() || authenticatedUser.displayName,
-                      profilePhotoUrl.trim(),
-                    )
+                    void onProfileUpdated({
+                      avatarUrl: profilePhotoUrl.trim(),
+                      displayName: profileName.trim() || authenticatedUser.displayName,
+                      favoriteMode: profileFavoriteMode,
+                      tagline: profileTagline.trim(),
+                    })
                   }
                   onUpdatePress={onUpdatePress}
+                  profileFavoriteMode={profileFavoriteMode}
                   profileBusy={profileBusy}
                   profileName={profileName}
                   profilePhotoUrl={profilePhotoUrl}
+                  profileTagline={profileTagline}
                   room={room}
+                  setProfileFavoriteMode={setProfileFavoriteMode}
                   setProfileName={(value) => {
                     setProfileName(value);
                     setDisplayName(value);
                   }}
                   setProfilePhotoUrl={setProfilePhotoUrl}
+                  setProfileTagline={setProfileTagline}
                   updateError={updateError}
                   updateState={updateState}
                 />
@@ -843,21 +881,34 @@ function PartyExperience({
                 joinCode={joinCode}
                 onCreateRoom={handleCreateRoom}
                 onJoinRoom={handleJoinRoom}
+                roomName={roomName}
                 setDisplayName={setDisplayName}
                 setJoinCode={setJoinCode}
+                setRoomName={setRoomName}
               />
             ) : (
               <ProfileSetupScreen
                 authenticatedUser={authenticatedUser}
                 busy={profileBusy}
                 displayName={profileName}
+                favoriteMode={profileFavoriteMode}
                 photoUrl={profilePhotoUrl}
-                onSave={() => void onProfileUpdated(profileName.trim() || authenticatedUser.displayName, profilePhotoUrl.trim())}
+                onSave={() =>
+                  void onProfileUpdated({
+                    avatarUrl: profilePhotoUrl.trim(),
+                    displayName: profileName.trim() || authenticatedUser.displayName,
+                    favoriteMode: profileFavoriteMode,
+                    tagline: profileTagline.trim(),
+                  })
+                }
+                setFavoriteMode={setProfileFavoriteMode}
                 setDisplayName={(value) => {
                   setProfileName(value);
                   setDisplayName(value);
                 }}
                 setPhotoUrl={setProfilePhotoUrl}
+                setTagline={setProfileTagline}
+                tagline={profileTagline}
               />
             )}
           </ScrollView>
@@ -879,10 +930,17 @@ function sessionToUser(session: Session): AuthenticatedUser {
       session.user.user_metadata?.avatar_url ||
       session.user.user_metadata?.picture ||
       "",
+    favoriteMode: normalizeFavoriteMode(session.user.user_metadata?.favorite_mode),
     id: session.user.id,
     displayName,
     email: session.user.email || "usuario sin correo",
+    tagline: session.user.user_metadata?.tagline || "",
   };
+}
+
+function normalizeFavoriteMode(value: unknown): PartyMode {
+  const candidate = typeof value === "string" ? value : "";
+  return MODES.some((mode) => mode.id === candidate) ? (candidate as PartyMode) : "previa";
 }
 
 function inviteCodeFromUrl(url: string) {
@@ -952,8 +1010,10 @@ function HomeScreen({
   joinCode,
   onCreateRoom,
   onJoinRoom,
+  roomName,
   setDisplayName,
   setJoinCode,
+  setRoomName,
 }: {
   authenticatedUser: AuthenticatedUser;
   busyLabel: string;
@@ -961,23 +1021,25 @@ function HomeScreen({
   joinCode: string;
   onCreateRoom: () => void;
   onJoinRoom: () => void;
+  roomName: string;
   setDisplayName: (value: string) => void;
   setJoinCode: (value: string) => void;
+  setRoomName: (value: string) => void;
 }) {
   return (
     <>
-      <LinearGradient colors={["#10211E", "#1D7874"]} style={styles.homeHero}>
+      <LinearGradient colors={["#0C1814", "#16362C", "#265847"]} style={styles.homeHero}>
         <Text style={styles.homeEyebrow}>Tu grupo, una sola sala</Text>
         <Text style={styles.homeHeroTitle}>
           Crea la previa, comparte el codigo y deja que kazp ordene el caos musical.
         </Text>
         <View style={styles.homeHeroPillRow}>
-          <View style={styles.homeHeroPill}>
-            <Ionicons color="#D9B44A" name="person-circle-outline" size={14} />
+        <View style={styles.homeHeroPill}>
+            <Ionicons color={THEME.accent} name="person-circle-outline" size={14} />
             <Text style={styles.homeHeroPillText}>{authenticatedUser.displayName}</Text>
           </View>
           <View style={styles.homeHeroPill}>
-            <Ionicons color="#D9B44A" name="share-social-outline" size={14} />
+            <Ionicons color={THEME.accent} name="share-social-outline" size={14} />
             <Text style={styles.homeHeroPillText}>Invita y conecta Spotify</Text>
           </View>
         </View>
@@ -988,13 +1050,20 @@ function HomeScreen({
         <Text style={styles.bodyText}>
           El nombre se usa dentro de la sala para identificarte cuando conectes Spotify.
         </Text>
-        <TextInput
-          onChangeText={setDisplayName}
-          placeholder="Tu alias en la sala"
-          placeholderTextColor="#7A8582"
-          style={styles.input}
-          value={displayName}
-        />
+          <TextInput
+            onChangeText={setRoomName}
+            placeholder="Nombre de la sala"
+            placeholderTextColor={THEME.mutedSoft}
+            style={styles.input}
+            value={roomName}
+          />
+          <TextInput
+            onChangeText={setDisplayName}
+            placeholder="Tu alias en la sala"
+            placeholderTextColor={THEME.mutedSoft}
+            style={styles.input}
+            value={displayName}
+          />
         <AppButton
           icon="add-circle"
           label="Crear sala"
@@ -1012,7 +1081,7 @@ function HomeScreen({
           autoCapitalize="characters"
           onChangeText={setJoinCode}
           placeholder="ABCD12"
-          placeholderTextColor="#7A8582"
+          placeholderTextColor={THEME.mutedSoft}
           style={styles.input}
           value={joinCode}
         />
@@ -1074,8 +1143,8 @@ function RoomScreen({
 
   return (
     <>
-      <LinearGradient colors={["#10211E", "#163630"]} style={styles.roomHero}>
-        <Text style={styles.roomHeroEyebrow}>Sala {room.code}</Text>
+      <LinearGradient colors={["#0C1814", "#16362C", "#22463A"]} style={styles.roomHero}>
+        <Text style={styles.roomHeroEyebrow}>{room.name || `Sala ${room.code}`}</Text>
         <Text style={styles.roomHeroTitle}>
           {isSpotifyReady
             ? "Tu cuenta ya esta dentro del grupo. Ya puedes generar y guardar la sesion en tu Spotify."
@@ -1152,7 +1221,7 @@ function RoomScreen({
         </Text>
         <View style={styles.spotifyStatusCard}>
           <Ionicons
-            color={isSpotifyReady ? "#1D7874" : "#D9B44A"}
+            color={isSpotifyReady ? THEME.accent : THEME.accentDeep}
             name={isSpotifyReady ? "checkmark-circle" : "musical-notes-outline"}
             size={22}
           />
@@ -1232,9 +1301,9 @@ function ProfilesScreen({ members }: { members: PartyMember[] }) {
             </View>
           </View>
           <Text style={styles.roastText}>{member.profile.roast}</Text>
-          <TagSection color="#1D7874" items={member.profile.strengths} title="Fortalezas" />
-          <TagSection color="#EE4266" items={member.profile.crimes} title="Delitos musicales" />
-          <TagSection color="#D9B44A" items={member.profile.badges} title="Insignias" />
+          <TagSection color={THEME.accentDeep} items={member.profile.strengths} title="Fortalezas" />
+          <TagSection color={THEME.danger} items={member.profile.crimes} title="Delitos musicales" />
+          <TagSection color={THEME.accent} items={member.profile.badges} title="Insignias" />
         </View>
       ))}
     </>
@@ -1248,6 +1317,7 @@ function SessionScreen({
   onSavePlaylist,
   playlist,
   roomCode,
+  roomName,
 }: {
   canUsePartyTools: boolean;
   currentMember: PartyMember | null;
@@ -1255,6 +1325,7 @@ function SessionScreen({
   onSavePlaylist: () => void;
   playlist: PartyRoom["playlist"];
   roomCode: string;
+  roomName: string;
 }) {
   const canSaveOnSpotify = Boolean(currentMember);
 
@@ -1274,7 +1345,7 @@ function SessionScreen({
         </View>
         <View style={styles.spotifyStatusCard}>
           <Ionicons
-            color={canSaveOnSpotify ? "#1D7874" : "#D9B44A"}
+            color={canSaveOnSpotify ? THEME.accent : THEME.accentDeep}
             name={canSaveOnSpotify ? "save-outline" : "musical-notes-outline"}
             size={22}
           />
@@ -1284,7 +1355,7 @@ function SessionScreen({
             </Text>
             <Text style={styles.spotifyStatusText}>
               {canSaveOnSpotify
-                ? `La playlist se guardara como "Sala ${roomCode}" en la cuenta conectada de ${currentMember?.displayName}.`
+                ? `La playlist se guardara como "${roomName || `Sala ${roomCode}`}" en la cuenta conectada de ${currentMember?.displayName}.`
                 : "La sesion final se guarda en tu propia biblioteca, no en la de otro miembro."}
             </Text>
           </View>
@@ -1347,7 +1418,7 @@ function LiveScreen({
         <View style={styles.voteGrid}>
           {LIVE_VOTES.map((vote) => (
             <Pressable key={vote} onPress={() => onVote(vote)} style={styles.voteButton}>
-              {busyLabel === vote ? <ActivityIndicator color="#0D1321" /> : <Text style={styles.voteText}>{vote}</Text>}
+              {busyLabel === vote ? <ActivityIndicator color={THEME.background} /> : <Text style={styles.voteText}>{vote}</Text>}
             </Pressable>
           ))}
         </View>
@@ -1360,7 +1431,7 @@ function LiveScreen({
         ) : (
           live.votes.slice(0, 6).map((vote) => (
             <View key={vote.id} style={styles.voteLog}>
-              <Ionicons color="#D9B44A" name="flash" size={16} />
+          <Ionicons color={THEME.accent} name="flash" size={16} />
               <Text style={styles.voteLogText}>{vote.label}</Text>
             </View>
           ))
@@ -1401,7 +1472,7 @@ function SummaryScreen({
       <SummaryLine label="Momento pico" value={summary.peakMoment} />
       <SummaryLine label="Descenso a la miseria" value={summary.emotionalCrash} />
       <Text style={styles.finalVerdict}>{summary.finalVerdict}</Text>
-      <TagSection color="#1D7874" items={summary.awards} title="Premios" />
+      <TagSection color={THEME.accentDeep} items={summary.awards} title="Premios" />
     </View>
   );
 }
@@ -1414,12 +1485,16 @@ function ProfileScreen({
   onConnectSpotify,
   onProfileSave,
   onUpdatePress,
+  profileFavoriteMode,
   profileBusy,
   profileName,
   profilePhotoUrl,
+  profileTagline,
   room,
+  setProfileFavoriteMode,
   setProfileName,
   setProfilePhotoUrl,
+  setProfileTagline,
   updateError,
   updateState,
 }: {
@@ -1430,12 +1505,16 @@ function ProfileScreen({
   onConnectSpotify: () => Promise<void>;
   onProfileSave: () => void;
   onUpdatePress: () => Promise<void>;
+  profileFavoriteMode: PartyMode;
   profileBusy: boolean;
   profileName: string;
   profilePhotoUrl: string;
+  profileTagline: string;
   room: PartyRoom;
+  setProfileFavoriteMode: (value: PartyMode) => void;
   setProfileName: (value: string) => void;
   setProfilePhotoUrl: (value: string) => void;
+  setProfileTagline: (value: string) => void;
   updateError: string;
   updateState: UpdateState;
 }) {
@@ -1451,7 +1530,7 @@ function ProfileScreen({
 
   return (
     <>
-      <LinearGradient colors={["#0D1321", "#1D7874"]} style={styles.profileHero}>
+      <LinearGradient colors={["#08120F", "#133026", "#255847"]} style={styles.profileHero}>
         <View style={styles.profileHeroTop}>
           <IdentityAvatar
             avatarUrl={profilePhotoUrl || authenticatedUser.avatarUrl}
@@ -1461,24 +1540,30 @@ function ProfileScreen({
           <View style={styles.profileHeroCopy}>
             <Text style={styles.profileHeroName}>{profileName || authenticatedUser.displayName}</Text>
             <Text style={styles.profileHeroMeta}>
-              {hasSpotifyProfile
-                ? `${currentMember?.profile.archetype || "Spotify listo"} listo para guardar playlists en tu cuenta`
-                : "Conecta tu cuenta de Spotify para completar tu perfil y guardar la sesion final"}
+              {profileTagline.trim()
+                ? `${profileTagline.trim()} · ${hasSpotifyProfile ? currentMember?.profile.archetype || "Spotify listo" : "Conecta Spotify para completar tu perfil"}`
+                : hasSpotifyProfile
+                  ? `${currentMember?.profile.archetype || "Spotify listo"} listo para guardar playlists en tu cuenta`
+                  : "Conecta tu cuenta de Spotify para completar tu perfil y guardar la sesion final"}
             </Text>
           </View>
         </View>
         <View style={styles.profilePillRow}>
           <View style={styles.profilePill}>
-            <Ionicons color="#D9B44A" name="albums-outline" size={14} />
-            <Text style={styles.profilePillText}>Sala {room.code}</Text>
+            <Ionicons color={THEME.accent} name="albums-outline" size={14} />
+            <Text style={styles.profilePillText}>{room.name || `Sala ${room.code}`}</Text>
           </View>
           <View style={styles.profilePill}>
-            <Ionicons color="#D9B44A" name="people-outline" size={14} />
+            <Ionicons color={THEME.accent} name="people-outline" size={14} />
             <Text style={styles.profilePillText}>{room.members.length} conectados</Text>
           </View>
           <View style={styles.profilePill}>
-            <Ionicons color="#D9B44A" name={hasSpotifyProfile ? "musical-notes-outline" : "radio-outline"} size={14} />
+            <Ionicons color={THEME.accent} name={hasSpotifyProfile ? "musical-notes-outline" : "radio-outline"} size={14} />
             <Text style={styles.profilePillText}>{hasSpotifyProfile ? "Spotify listo" : "Spotify pendiente"}</Text>
+          </View>
+          <View style={styles.profilePill}>
+            <Ionicons color={THEME.accent} name="sparkles-outline" size={14} />
+            <Text style={styles.profilePillText}>{MODES.find((mode) => mode.id === profileFavoriteMode)?.label || "Previa"}</Text>
           </View>
         </View>
       </LinearGradient>
@@ -1539,10 +1624,14 @@ function ProfileScreen({
         authenticatedUser={authenticatedUser}
         busy={profileBusy}
         displayName={profileName}
+        favoriteMode={profileFavoriteMode}
         photoUrl={profilePhotoUrl}
         onSave={onProfileSave}
+        setFavoriteMode={setProfileFavoriteMode}
         setDisplayName={setProfileName}
         setPhotoUrl={setProfilePhotoUrl}
+        setTagline={setProfileTagline}
+        tagline={profileTagline}
       />
 
       <View style={styles.panel}>
@@ -1558,9 +1647,9 @@ function ProfileScreen({
               <Text style={styles.miniScore}>{currentMember.stats.partyScore}%</Text>
             </View>
             <Text style={styles.roastText}>{currentMember.profile.roast}</Text>
-            <TagSection color="#1D7874" items={currentMember.profile.strengths} title="Fortalezas" />
-            <TagSection color="#EE4266" items={currentMember.profile.crimes} title="Delitos musicales" />
-            <TagSection color="#D9B44A" items={currentMember.topArtists.slice(0, 4)} title="Top artistas" />
+            <TagSection color={THEME.accentDeep} items={currentMember.profile.strengths} title="Fortalezas" />
+            <TagSection color={THEME.danger} items={currentMember.profile.crimes} title="Delitos musicales" />
+            <TagSection color={THEME.accent} items={currentMember.topArtists.slice(0, 4)} title="Top artistas" />
             <View style={styles.actionRow}>
               <AppButton
                 icon="musical-notes-outline"
@@ -1599,18 +1688,26 @@ function ProfileSetupScreen({
   authenticatedUser,
   busy,
   displayName,
+  favoriteMode,
   onSave,
   photoUrl,
+  setFavoriteMode,
   setDisplayName,
   setPhotoUrl,
+  setTagline,
+  tagline,
 }: {
   authenticatedUser: AuthenticatedUser;
   busy: boolean;
   displayName: string;
+  favoriteMode: PartyMode;
   onSave: () => void;
   photoUrl: string;
+  setFavoriteMode: (value: PartyMode) => void;
   setDisplayName: (value: string) => void;
   setPhotoUrl: (value: string) => void;
+  setTagline: (value: string) => void;
+  tagline: string;
 }) {
   return (
     <View style={styles.panel}>
@@ -1632,7 +1729,7 @@ function ProfileSetupScreen({
       <TextInput
         onChangeText={setDisplayName}
         placeholder="Tu alias en kazp"
-        placeholderTextColor="#7A8582"
+        placeholderTextColor={THEME.mutedSoft}
         style={styles.input}
         value={displayName}
       />
@@ -1640,10 +1737,28 @@ function ProfileSetupScreen({
         autoCapitalize="none"
         onChangeText={setPhotoUrl}
         placeholder="URL de tu foto"
-        placeholderTextColor="#7A8582"
+        placeholderTextColor={THEME.mutedSoft}
         style={styles.input}
         value={photoUrl}
       />
+      <TextInput
+        onChangeText={setTagline}
+        placeholder="Tu frase o vibe"
+        placeholderTextColor={THEME.mutedSoft}
+        style={styles.input}
+        value={tagline}
+      />
+      <Text style={styles.helperText}>Modo por defecto</Text>
+      <View style={styles.modeRow}>
+        {MODES.map((mode) => (
+          <Pill
+            key={mode.id}
+            active={favoriteMode === mode.id}
+            label={mode.label}
+            onPress={() => setFavoriteMode(mode.id)}
+          />
+        ))}
+      </View>
       <AppButton
         icon="save"
         label="Guardar perfil"
@@ -1667,7 +1782,7 @@ function FeatureGrid() {
     <View style={styles.featureGrid}>
       {items.map((item) => (
         <View key={item.title} style={styles.featureCard}>
-          <Ionicons color="#EE4266" name={item.icon} size={22} />
+          <Ionicons color={THEME.accent} name={item.icon} size={22} />
           <Text style={styles.featureTitle}>{item.title}</Text>
           <Text style={styles.featureText}>{item.text}</Text>
         </View>
@@ -1753,7 +1868,7 @@ function TrackRow({ index, track }: { index: number; track: Track }) {
         <Image source={{ uri: track.imageUrl }} style={styles.cover} />
       ) : (
         <View style={styles.coverFallback}>
-          <Ionicons color="#D9B44A" name="disc-outline" size={22} />
+          <Ionicons color={THEME.accent} name="disc-outline" size={22} />
         </View>
       )}
       <View style={styles.trackCopy}>
@@ -1764,7 +1879,7 @@ function TrackRow({ index, track }: { index: number; track: Track }) {
           {track.artist}
         </Text>
       </View>
-      <Ionicons color="#1D7874" name="open-outline" size={18} />
+      <Ionicons color={THEME.accentDeep} name="open-outline" size={18} />
     </Pressable>
   );
 }
@@ -1796,7 +1911,7 @@ function AppButton({
         pressed && styles.buttonPressed,
       ]}
     >
-      {loading ? <ActivityIndicator color={variant === "dark" ? "#F8F4E3" : "#0D1321"} /> : <Ionicons color={variant === "dark" ? "#F8F4E3" : "#0D1321"} name={icon} size={18} />}
+      {loading ? <ActivityIndicator color={variant === "dark" ? THEME.text : THEME.background} /> : <Ionicons color={variant === "dark" ? THEME.text : THEME.background} name={icon} size={18} />}
       <Text style={[styles.buttonText, variant === "dark" && styles.buttonTextDark]}>{label}</Text>
     </Pressable>
   );
@@ -1821,7 +1936,8 @@ function TabBar({ activeTab, onChange }: { activeTab: TabKey; onChange: (tab: Ta
             style={[styles.tabButton, activeTab === tab.id && styles.tabButtonActive]}
           >
             <Ionicons
-              color={activeTab === tab.id ? "#0D1321" : "#D8E3E0"}
+              color={activeTab === tab.id ? THEME.background : THEME.muted}
+              
               name={tab.icon}
               size={18}
             />
@@ -1856,7 +1972,7 @@ function UpdateBanner({
         {error ? <Text style={styles.updateBannerError}>{error}</Text> : null}
       </View>
       <Pressable disabled={busy} onPress={onPress} style={[styles.updateButton, busy && styles.buttonDisabled]}>
-        {busy ? <ActivityIndicator color="#0D1321" /> : <Text style={styles.updateButtonText}>Actualizar</Text>}
+        {busy ? <ActivityIndicator color={THEME.background} /> : <Text style={styles.updateButtonText}>Actualizar</Text>}
       </Pressable>
     </View>
   );
@@ -1923,7 +2039,7 @@ function SummaryLine({ label, value }: { label: string; value: string }) {
 function EmptyState({ icon, text, title }: { icon: IconName; text: string; title: string }) {
   return (
     <View style={styles.emptyState}>
-      <Ionicons color="#D9B44A" name={icon} size={32} />
+      <Ionicons color={THEME.accent} name={icon} size={32} />
       <Text style={styles.emptyTitle}>{title}</Text>
       <Text style={styles.emptyText}>{text}</Text>
     </View>
@@ -1933,7 +2049,7 @@ function EmptyState({ icon, text, title }: { icon: IconName; text: string; title
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: "#0D1321",
+    backgroundColor: THEME.background,
   },
   authLoading: {
     alignItems: "center",
@@ -1941,14 +2057,14 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   authLoadingText: {
-    color: "#F8F4E3",
+    color: THEME.text,
     fontSize: 15,
     fontWeight: "800",
     marginTop: 12,
   },
   screen: {
     flex: 1,
-    backgroundColor: "#F8F4E3",
+    backgroundColor: THEME.background,
   },
   header: {
     paddingBottom: 18,
@@ -1965,25 +2081,27 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   logo: {
-    borderRadius: 14,
+    borderRadius: 16,
     height: 46,
     width: 46,
   },
   homeHero: {
-    borderRadius: 8,
+    borderColor: THEME.border,
+    borderRadius: 18,
+    borderWidth: 1,
     marginBottom: 14,
     overflow: "hidden",
     padding: 18,
   },
   homeEyebrow: {
-    color: "#B8CCC8",
+    color: THEME.muted,
     fontSize: 12,
     fontWeight: "900",
     marginBottom: 8,
     textTransform: "uppercase",
   },
   homeHeroTitle: {
-    color: "#FFFFFF",
+    color: THEME.text,
     fontSize: 24,
     fontWeight: "900",
     lineHeight: 31,
@@ -1996,8 +2114,8 @@ const styles = StyleSheet.create({
   },
   homeHeroPill: {
     alignItems: "center",
-    backgroundColor: "rgba(255,255,255,0.12)",
-    borderColor: "rgba(255,255,255,0.14)",
+    backgroundColor: "rgba(167,227,190,0.10)",
+    borderColor: "rgba(167,227,190,0.18)",
     borderRadius: 999,
     borderWidth: 1,
     flexDirection: "row",
@@ -2006,13 +2124,13 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
   },
   homeHeroPillText: {
-    color: "#FFFFFF",
+    color: THEME.text,
     fontSize: 12,
     fontWeight: "800",
   },
   homeTabRow: {
-    backgroundColor: "#FFFFFF",
-    borderColor: "#E3DED0",
+    backgroundColor: THEME.panel,
+    borderColor: THEME.border,
     borderRadius: 999,
     borderWidth: 1,
     flexDirection: "row",
@@ -2028,40 +2146,42 @@ const styles = StyleSheet.create({
     minHeight: 40,
   },
   homeTabButtonActive: {
-    backgroundColor: "#10211E",
+    backgroundColor: THEME.accentSoft,
   },
   homeTabText: {
-    color: "#596663",
+    color: THEME.muted,
     fontSize: 14,
     fontWeight: "900",
   },
   homeTabTextActive: {
-    color: "#FFFFFF",
+    color: THEME.text,
   },
   appName: {
-    color: "#FFFFFF",
+    color: THEME.text,
     fontSize: 20,
     fontWeight: "900",
   },
   caption: {
-    color: "#B8CCC8",
+    color: THEME.muted,
     fontSize: 12,
     marginTop: 2,
   },
   roomHero: {
-    borderRadius: 8,
+    borderColor: THEME.border,
+    borderRadius: 18,
+    borderWidth: 1,
     marginBottom: 14,
     overflow: "hidden",
     padding: 16,
   },
   roomHeroEyebrow: {
-    color: "#B8CCC8",
+    color: THEME.muted,
     fontSize: 12,
     fontWeight: "900",
     textTransform: "uppercase",
   },
   roomHeroTitle: {
-    color: "#FFFFFF",
+    color: THEME.text,
     fontSize: 20,
     fontWeight: "900",
     lineHeight: 27,
@@ -2073,26 +2193,28 @@ const styles = StyleSheet.create({
     marginTop: 16,
   },
   roomHeroPill: {
-    backgroundColor: "rgba(255,255,255,0.12)",
-    borderColor: "rgba(255,255,255,0.14)",
-    borderRadius: 8,
+    backgroundColor: "rgba(167,227,190,0.10)",
+    borderColor: "rgba(167,227,190,0.18)",
+    borderRadius: 14,
     borderWidth: 1,
     flex: 1,
     padding: 10,
   },
   roomHeroPillValue: {
-    color: "#FFFFFF",
+    color: THEME.text,
     fontSize: 22,
     fontWeight: "900",
   },
   roomHeroPillLabel: {
-    color: "#B8CCC8",
+    color: THEME.muted,
     fontSize: 11,
     fontWeight: "800",
     marginTop: 4,
   },
   profileHero: {
-    borderRadius: 8,
+    borderColor: THEME.border,
+    borderRadius: 18,
+    borderWidth: 1,
     marginBottom: 14,
     overflow: "hidden",
     padding: 16,
@@ -2113,7 +2235,7 @@ const styles = StyleSheet.create({
     width: 64,
   },
   profileAvatarText: {
-    color: "#FFFFFF",
+    color: THEME.text,
     fontSize: 24,
     fontWeight: "900",
   },
@@ -2121,17 +2243,17 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   profileHeroName: {
-    color: "#FFFFFF",
+    color: THEME.text,
     fontSize: 22,
     fontWeight: "900",
   },
   profileHeroEmail: {
-    color: "#D8E3E0",
+    color: THEME.muted,
     fontSize: 13,
     marginTop: 2,
   },
   profileHeroMeta: {
-    color: "#B8CCC8",
+    color: THEME.muted,
     fontSize: 11,
     fontWeight: "800",
     marginTop: 6,
@@ -2144,8 +2266,8 @@ const styles = StyleSheet.create({
   },
   profilePill: {
     alignItems: "center",
-    backgroundColor: "rgba(255,255,255,0.12)",
-    borderColor: "rgba(255,255,255,0.14)",
+    backgroundColor: "rgba(167,227,190,0.10)",
+    borderColor: "rgba(167,227,190,0.18)",
     borderRadius: 999,
     borderWidth: 1,
     flexDirection: "row",
@@ -2154,7 +2276,7 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
   },
   profilePillText: {
-    color: "#FFFFFF",
+    color: THEME.text,
     fontSize: 12,
     fontWeight: "800",
   },
@@ -2168,18 +2290,18 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   profileEditorName: {
-    color: "#0D1321",
+    color: THEME.text,
     fontSize: 18,
     fontWeight: "900",
   },
   profileEditorHint: {
-    color: "#596663",
+    color: THEME.muted,
     fontSize: 13,
     lineHeight: 18,
     marginTop: 4,
   },
   title: {
-    color: "#FFFFFF",
+    color: THEME.text,
     fontSize: 28,
     fontWeight: "900",
     lineHeight: 34,
@@ -2197,16 +2319,16 @@ const styles = StyleSheet.create({
     marginTop: 14,
   },
   authSessionText: {
-    color: "#D8E3E0",
+    color: THEME.muted,
     flex: 1,
     fontSize: 12,
     fontWeight: "800",
   },
   signOutButton: {
     alignItems: "center",
-    backgroundColor: "rgba(255,255,255,0.12)",
-    borderColor: "rgba(255,255,255,0.16)",
-    borderRadius: 8,
+    backgroundColor: "rgba(167,227,190,0.10)",
+    borderColor: "rgba(167,227,190,0.18)",
+    borderRadius: 14,
     borderWidth: 1,
     flexDirection: "row",
     gap: 6,
@@ -2216,48 +2338,50 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
   },
   signOutText: {
-    color: "#F8F4E3",
+    color: THEME.text,
     fontSize: 12,
     fontWeight: "900",
   },
   pill: {
-    backgroundColor: "rgba(255,255,255,0.12)",
-    borderColor: "rgba(255,255,255,0.16)",
-    borderRadius: 8,
+    backgroundColor: THEME.panel,
+    borderColor: THEME.border,
+    borderRadius: 14,
     borderWidth: 1,
     paddingHorizontal: 11,
     paddingVertical: 8,
   },
   pillActive: {
-    backgroundColor: "#D9B44A",
-    borderColor: "#D9B44A",
+    backgroundColor: THEME.accent,
+    borderColor: THEME.accent,
   },
   pillText: {
-    color: "#F8F4E3",
+    color: THEME.text,
     fontSize: 12,
     fontWeight: "800",
   },
   pillTextActive: {
-    color: "#0D1321",
+    color: THEME.background,
   },
   tabBar: {
-    backgroundColor: "#10211E",
+    backgroundColor: THEME.panel,
+    borderColor: THEME.border,
     borderRadius: 20,
+    borderWidth: 1,
     flexDirection: "row",
     gap: 6,
     padding: 6,
   },
   tabBarShell: {
-    backgroundColor: "#F8F4E3",
-    borderBottomColor: "#E3DED0",
+    backgroundColor: THEME.background,
+    borderBottomColor: THEME.border,
     borderBottomWidth: 1,
     paddingHorizontal: 12,
     paddingVertical: 10,
   },
   updateBanner: {
     alignItems: "center",
-    backgroundColor: "#E8FFF4",
-    borderBottomColor: "#B6E8D0",
+    backgroundColor: THEME.panelSoft,
+    borderBottomColor: THEME.border,
     borderBottomWidth: 1,
     flexDirection: "row",
     gap: 12,
@@ -2268,12 +2392,12 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   updateBannerTitle: {
-    color: "#0D1321",
+    color: THEME.text,
     fontSize: 14,
     fontWeight: "900",
   },
   updateBannerText: {
-    color: "#285145",
+    color: THEME.muted,
     fontSize: 12,
     lineHeight: 18,
     marginTop: 2,
@@ -2287,15 +2411,15 @@ const styles = StyleSheet.create({
   },
   updateButton: {
     alignItems: "center",
-    backgroundColor: "#D9B44A",
-    borderRadius: 8,
+    backgroundColor: THEME.accent,
+    borderRadius: 14,
     height: 38,
     justifyContent: "center",
     minWidth: 102,
     paddingHorizontal: 14,
   },
   updateButtonText: {
-    color: "#0D1321",
+    color: THEME.background,
     fontSize: 13,
     fontWeight: "900",
   },
@@ -2309,68 +2433,68 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
   },
   tabButtonActive: {
-    backgroundColor: "#D9B44A",
+    backgroundColor: THEME.accent,
   },
   tabText: {
-    color: "#D8E3E0",
+    color: THEME.muted,
     fontSize: 11,
     fontWeight: "800",
   },
   tabTextActive: {
-    color: "#0D1321",
+    color: THEME.background,
   },
   content: {
     padding: 16,
     paddingBottom: 34,
   },
   panel: {
-    backgroundColor: "#FFFFFF",
-    borderColor: "#E3DED0",
-    borderRadius: 8,
+    backgroundColor: THEME.panel,
+    borderColor: THEME.border,
+    borderRadius: 18,
     borderWidth: 1,
     marginBottom: 14,
     padding: 16,
   },
   panelTitle: {
-    color: "#0D1321",
+    color: THEME.text,
     fontSize: 20,
     fontWeight: "900",
     marginBottom: 10,
   },
   bodyText: {
-    color: "#4E5B58",
+    color: THEME.muted,
     fontSize: 14,
     lineHeight: 20,
     marginBottom: 12,
   },
   inviteCodeCard: {
     alignItems: "center",
-    backgroundColor: "#F8F4E3",
-    borderColor: "#E3DED0",
-    borderRadius: 8,
+    backgroundColor: THEME.panelSoft,
+    borderColor: THEME.border,
+    borderRadius: 16,
     borderWidth: 1,
     marginBottom: 12,
     paddingHorizontal: 12,
     paddingVertical: 14,
   },
   inviteCodeText: {
-    color: "#0D1321",
+    color: THEME.text,
     fontSize: 28,
     fontVariant: ["tabular-nums"],
     fontWeight: "900",
     letterSpacing: 0,
   },
   inviteCodeHint: {
-    color: "#6C7774",
+    color: THEME.mutedSoft,
     fontSize: 12,
     fontWeight: "700",
     marginTop: 6,
   },
   spotifyStatusCard: {
     alignItems: "flex-start",
-    backgroundColor: "#F8F4E3",
-    borderColor: "#E3DED0",
-    borderRadius: 8,
+    backgroundColor: THEME.panelSoft,
+    borderColor: THEME.border,
+    borderRadius: 16,
     borderWidth: 1,
     flexDirection: "row",
     gap: 12,
@@ -2381,29 +2505,29 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   spotifyStatusTitle: {
-    color: "#0D1321",
+    color: THEME.text,
     fontSize: 14,
     fontWeight: "900",
   },
   spotifyStatusText: {
-    color: "#596663",
+    color: THEME.muted,
     fontSize: 13,
     lineHeight: 18,
     marginTop: 4,
   },
   helperText: {
-    color: "#6C7774",
+    color: THEME.mutedSoft,
     fontSize: 12,
     fontWeight: "700",
     lineHeight: 18,
     marginBottom: 12,
   },
   input: {
-    backgroundColor: "#F8F4E3",
-    borderColor: "#E3DED0",
-    borderRadius: 8,
+    backgroundColor: THEME.input,
+    borderColor: THEME.border,
+    borderRadius: 14,
     borderWidth: 1,
-    color: "#0D1321",
+    color: THEME.text,
     fontSize: 16,
     height: 48,
     marginBottom: 12,
@@ -2411,8 +2535,8 @@ const styles = StyleSheet.create({
   },
   button: {
     alignItems: "center",
-    backgroundColor: "#D9B44A",
-    borderRadius: 8,
+    backgroundColor: THEME.accent,
+    borderRadius: 14,
     flexDirection: "row",
     gap: 8,
     height: 46,
@@ -2420,11 +2544,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
   },
   buttonDark: {
-    backgroundColor: "#0D1321",
+    backgroundColor: THEME.accentSoft,
   },
   buttonGhost: {
-    backgroundColor: "#F8F4E3",
-    borderColor: "#E3DED0",
+    backgroundColor: THEME.panelSoft,
+    borderColor: THEME.border,
     borderWidth: 1,
   },
   buttonDisabled: {
@@ -2434,12 +2558,12 @@ const styles = StyleSheet.create({
     transform: [{ scale: 0.99 }],
   },
   buttonText: {
-    color: "#0D1321",
+    color: THEME.background,
     fontSize: 15,
     fontWeight: "900",
   },
   buttonTextDark: {
-    color: "#F8F4E3",
+    color: THEME.text,
   },
   actionRow: {
     flexDirection: "row",
@@ -2450,26 +2574,26 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   stageCard: {
-    backgroundColor: "#F8F4E3",
-    borderColor: "#E3DED0",
-    borderRadius: 8,
+    backgroundColor: THEME.panelSoft,
+    borderColor: THEME.border,
+    borderRadius: 16,
     borderWidth: 1,
     padding: 12,
   },
   stageNumber: {
-    color: "#1D7874",
+    color: THEME.accentDeep,
     fontSize: 12,
     fontWeight: "900",
     textTransform: "uppercase",
   },
   stageTitle: {
-    color: "#0D1321",
+    color: THEME.text,
     fontSize: 15,
     fontWeight: "900",
     marginTop: 4,
   },
   stageText: {
-    color: "#596663",
+    color: THEME.muted,
     fontSize: 13,
     lineHeight: 18,
     marginTop: 4,
@@ -2480,9 +2604,9 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   featureCard: {
-    backgroundColor: "#FFFFFF",
-    borderColor: "#E3DED0",
-    borderRadius: 8,
+    backgroundColor: THEME.panel,
+    borderColor: THEME.border,
+    borderRadius: 18,
     borderWidth: 1,
     flexBasis: "48%",
     flexGrow: 1,
@@ -2490,31 +2614,33 @@ const styles = StyleSheet.create({
     padding: 14,
   },
   featureTitle: {
-    color: "#0D1321",
+    color: THEME.text,
     fontSize: 15,
     fontWeight: "900",
     marginTop: 8,
   },
   featureText: {
-    color: "#596663",
+    color: THEME.muted,
     fontSize: 13,
     lineHeight: 18,
     marginTop: 4,
   },
   codeBadge: {
     alignItems: "flex-end",
-    backgroundColor: "rgba(255,255,255,0.12)",
-    borderRadius: 8,
+    backgroundColor: "rgba(167,227,190,0.10)",
+    borderColor: "rgba(167,227,190,0.18)",
+    borderRadius: 16,
+    borderWidth: 1,
     paddingHorizontal: 10,
     paddingVertical: 7,
   },
   codeLabel: {
-    color: "#B8CCC8",
+    color: THEME.muted,
     fontSize: 10,
     fontWeight: "800",
   },
   codeText: {
-    color: "#FFFFFF",
+    color: THEME.text,
     fontSize: 18,
     fontWeight: "900",
     letterSpacing: 0,
@@ -2525,31 +2651,31 @@ const styles = StyleSheet.create({
     marginBottom: 14,
   },
   metricCard: {
-    backgroundColor: "#FFFFFF",
-    borderColor: "#E3DED0",
-    borderRadius: 8,
+    backgroundColor: THEME.panel,
+    borderColor: THEME.border,
+    borderRadius: 16,
     borderWidth: 1,
     flex: 1,
     padding: 12,
   },
   metricLabel: {
-    color: "#596663",
+    color: THEME.muted,
     fontSize: 11,
     fontWeight: "800",
   },
   metricValue: {
-    color: "#1D7874",
+    color: THEME.accent,
     fontSize: 24,
     fontWeight: "900",
     marginTop: 4,
   },
   metricHot: {
-    color: "#EE4266",
+    color: THEME.danger,
   },
   memberMini: {
-    backgroundColor: "#F8F4E3",
-    borderColor: "#E3DED0",
-    borderRadius: 8,
+    backgroundColor: THEME.panelSoft,
+    borderColor: THEME.border,
+    borderRadius: 16,
     borderWidth: 1,
     flexDirection: "row",
     gap: 10,
@@ -2557,8 +2683,8 @@ const styles = StyleSheet.create({
     padding: 12,
   },
   memberMiniCurrent: {
-    backgroundColor: "#F0FBF8",
-    borderColor: "#1D7874",
+    backgroundColor: "#19382E",
+    borderColor: THEME.accentDeep,
   },
   memberMiniText: {
     flex: 1,
@@ -2569,28 +2695,28 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   memberName: {
-    color: "#0D1321",
+    color: THEME.text,
     fontSize: 16,
     fontWeight: "900",
   },
   memberMeta: {
-    color: "#596663",
+    color: THEME.muted,
     fontSize: 12,
     marginTop: 3,
   },
   miniScore: {
-    color: "#1D7874",
+    color: THEME.accent,
     fontSize: 16,
     fontWeight: "900",
   },
   memberBadge: {
-    backgroundColor: "#10211E",
+    backgroundColor: THEME.accentSoft,
     borderRadius: 999,
     paddingHorizontal: 8,
     paddingVertical: 4,
   },
   memberBadgeText: {
-    color: "#FFFFFF",
+    color: THEME.text,
     fontSize: 10,
     fontWeight: "900",
     textTransform: "uppercase",
@@ -2602,15 +2728,15 @@ const styles = StyleSheet.create({
     marginTop: 8,
   },
   memberTag: {
-    backgroundColor: "#FFFFFF",
-    borderColor: "#E3DED0",
+    backgroundColor: THEME.panelRaised,
+    borderColor: THEME.border,
     borderRadius: 999,
     borderWidth: 1,
     paddingHorizontal: 8,
     paddingVertical: 4,
   },
   memberTagText: {
-    color: "#596663",
+    color: THEME.muted,
     fontSize: 11,
     fontWeight: "800",
   },
@@ -2621,32 +2747,32 @@ const styles = StyleSheet.create({
     marginBottom: 10,
   },
   scoreLabel: {
-    color: "#0D1321",
+    color: THEME.text,
     fontSize: 13,
     fontWeight: "800",
     width: 70,
   },
   scoreTrack: {
-    backgroundColor: "#EEE7D8",
+    backgroundColor: THEME.input,
     borderRadius: 999,
     flex: 1,
     height: 9,
     overflow: "hidden",
   },
   scoreFill: {
-    backgroundColor: "#1D7874",
+    backgroundColor: THEME.accentDeep,
     height: 9,
   },
   scoreValue: {
-    color: "#596663",
+    color: THEME.muted,
     fontSize: 12,
     fontWeight: "900",
     width: 38,
   },
   profileCard: {
-    backgroundColor: "#FFFFFF",
-    borderColor: "#E3DED0",
-    borderRadius: 8,
+    backgroundColor: THEME.panel,
+    borderColor: THEME.border,
+    borderRadius: 18,
     borderWidth: 1,
     marginBottom: 14,
     padding: 16,
@@ -2670,13 +2796,13 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   archetype: {
-    color: "#EE4266",
+    color: THEME.accent,
     fontSize: 15,
     fontWeight: "900",
     marginTop: 3,
   },
   roastText: {
-    color: "#0D1321",
+    color: THEME.text,
     fontSize: 18,
     fontWeight: "800",
     lineHeight: 24,
@@ -2686,7 +2812,7 @@ const styles = StyleSheet.create({
     marginTop: 10,
   },
   tagTitle: {
-    color: "#596663",
+    color: THEME.mutedSoft,
     fontSize: 12,
     fontWeight: "900",
     marginBottom: 8,
@@ -2704,7 +2830,7 @@ const styles = StyleSheet.create({
     paddingVertical: 7,
   },
   tagText: {
-    color: "#0D1321",
+    color: THEME.text,
     fontSize: 12,
     fontWeight: "800",
   },
@@ -2713,38 +2839,42 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   phaseCard: {
-    backgroundColor: "#F8F4E3",
-    borderRadius: 8,
+    backgroundColor: THEME.panelSoft,
+    borderColor: THEME.border,
+    borderRadius: 16,
+    borderWidth: 1,
     padding: 12,
   },
   phaseName: {
-    color: "#0D1321",
+    color: THEME.text,
     fontSize: 14,
     fontWeight: "900",
   },
   phaseEnergy: {
-    color: "#EE4266",
+    color: THEME.accent,
     fontSize: 22,
     fontWeight: "900",
     marginTop: 4,
   },
   phaseIntent: {
-    color: "#596663",
+    color: THEME.muted,
     fontSize: 13,
     lineHeight: 18,
     marginTop: 2,
   },
   trackRow: {
     alignItems: "center",
-    backgroundColor: "#F8F4E3",
-    borderRadius: 8,
+    backgroundColor: THEME.panelSoft,
+    borderColor: THEME.border,
+    borderRadius: 16,
+    borderWidth: 1,
     flexDirection: "row",
     gap: 10,
     marginBottom: 8,
     padding: 9,
   },
   trackIndex: {
-    color: "#596663",
+    color: THEME.mutedSoft,
     fontSize: 13,
     fontWeight: "900",
     width: 20,
@@ -2756,7 +2886,7 @@ const styles = StyleSheet.create({
   },
   coverFallback: {
     alignItems: "center",
-    backgroundColor: "#0D1321",
+    backgroundColor: THEME.input,
     borderRadius: 6,
     height: 50,
     justifyContent: "center",
@@ -2767,35 +2897,37 @@ const styles = StyleSheet.create({
     minWidth: 0,
   },
   trackTitle: {
-    color: "#0D1321",
+    color: THEME.text,
     fontSize: 15,
     fontWeight: "900",
   },
   trackArtist: {
-    color: "#596663",
+    color: THEME.muted,
     fontSize: 13,
     marginTop: 3,
   },
   liveHero: {
-    backgroundColor: "#0D1321",
-    borderRadius: 8,
+    backgroundColor: THEME.panel,
+    borderColor: THEME.border,
+    borderRadius: 18,
+    borderWidth: 1,
     marginBottom: 14,
     padding: 16,
   },
   liveLabel: {
-    color: "#B8CCC8",
+    color: THEME.muted,
     fontSize: 12,
     fontWeight: "900",
     textTransform: "uppercase",
   },
   energyValue: {
-    color: "#D9B44A",
+    color: THEME.accent,
     fontSize: 54,
     fontWeight: "900",
     marginTop: 2,
   },
   liveComment: {
-    color: "#FFFFFF",
+    color: THEME.text,
     fontSize: 18,
     fontWeight: "800",
     lineHeight: 25,
@@ -2808,8 +2940,8 @@ const styles = StyleSheet.create({
   },
   voteButton: {
     alignItems: "center",
-    backgroundColor: "#D9B44A",
-    borderRadius: 8,
+    backgroundColor: THEME.accent,
+    borderRadius: 14,
     flexBasis: "47%",
     flexGrow: 1,
     minHeight: 44,
@@ -2817,43 +2949,43 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
   },
   voteText: {
-    color: "#0D1321",
+    color: THEME.background,
     fontSize: 13,
     fontWeight: "900",
     textAlign: "center",
   },
   voteLog: {
     alignItems: "center",
-    borderBottomColor: "#EEE7D8",
+    borderBottomColor: THEME.border,
     borderBottomWidth: 1,
     flexDirection: "row",
     gap: 8,
     paddingVertical: 9,
   },
   voteLogText: {
-    color: "#0D1321",
+    color: THEME.text,
     fontSize: 14,
     fontWeight: "800",
   },
   summaryLine: {
-    borderBottomColor: "#EEE7D8",
+    borderBottomColor: THEME.border,
     borderBottomWidth: 1,
     paddingVertical: 10,
   },
   summaryLabel: {
-    color: "#596663",
+    color: THEME.mutedSoft,
     fontSize: 12,
     fontWeight: "900",
     textTransform: "uppercase",
   },
   summaryValue: {
-    color: "#0D1321",
+    color: THEME.text,
     fontSize: 17,
     fontWeight: "900",
     marginTop: 3,
   },
   finalVerdict: {
-    color: "#EE4266",
+    color: THEME.accent,
     fontSize: 18,
     fontWeight: "900",
     lineHeight: 24,
@@ -2861,30 +2993,32 @@ const styles = StyleSheet.create({
   },
   emptyState: {
     alignItems: "flex-start",
-    backgroundColor: "#F8F4E3",
-    borderRadius: 8,
+    backgroundColor: THEME.panelSoft,
+    borderColor: THEME.border,
+    borderRadius: 16,
+    borderWidth: 1,
     marginBottom: 12,
     padding: 16,
   },
   emptyTitle: {
-    color: "#0D1321",
+    color: THEME.text,
     fontSize: 18,
     fontWeight: "900",
     marginTop: 10,
   },
   emptyText: {
-    color: "#596663",
+    color: THEME.muted,
     fontSize: 14,
     lineHeight: 20,
     marginTop: 5,
   },
   avatarFallback: {
     alignItems: "center",
-    backgroundColor: "#1D7874",
+    backgroundColor: THEME.accentSoft,
     justifyContent: "center",
   },
   avatarInitial: {
-    color: "#FFFFFF",
+    color: THEME.text,
     fontSize: 18,
     fontWeight: "900",
   },

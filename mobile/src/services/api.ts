@@ -61,11 +61,12 @@ export function createRoomWithProfile(
   mode: PartyMode,
   hostName: string,
   appUserId: string,
+  roomName: string,
   avatarUrl?: string,
 ): Promise<PartyRoom> {
   return request<PartyRoom>("/rooms", {
     method: "POST",
-    body: JSON.stringify({ appUserId, avatarUrl: avatarUrl || "", mode, hostName }),
+    body: JSON.stringify({ appUserId, avatarUrl: avatarUrl || "", hostName, mode, roomName }),
   });
 }
 

@@ -1,17 +1,26 @@
 import "dotenv/config";
 import crypto from "crypto";
+import fs from "fs";
+import path from "path";
 import cors from "cors";
 import express from "express";
 import OpenAI from "openai";
+import { fileURLToPath } from "url";
 import { z } from "zod";
 
 const app = express();
 const port = Number(process.env.PORT || 8787);
 const publicBaseUrl = process.env.PUBLIC_BASE_URL || `http://localhost:${port}`;
 const openaiModel = process.env.OPENAI_MODEL || "gpt-5.2";
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const dataDir = path.resolve(__dirname, "../data");
+const spotifyAccountStorePath = path.join(dataDir, "spotify-accounts.json");
+const playlistCoverPath = path.resolve(__dirname, "../assets/playlist-cover.jpg");
 
 const rooms = new Map();
 const authStates = new Map();
+const spotifyAccounts = loadSpotifyAccounts();
 
 const partyModes = [
   "previa",
@@ -29,6 +38,7 @@ const createRoomSchema = z.object({
   avatarUrl: z.string().trim().max(400).optional(),
   hostName: z.string().trim().min(1).max(40).optional(),
   mode: z.enum(partyModes).default("previa"),
+  roomName: z.string().trim().min(1).max(48).optional(),
 });
 
 const joinRoomSchema = z.object({
@@ -69,7 +79,7 @@ app.get("/health", (_req, res) => {
 
 app.post("/rooms", asyncRoute(async (req, res) => {
   const input = createRoomSchema.parse(req.body);
-  const room = createRoom(input.mode);
+  const room = createRoom(input.mode, input.roomName);
 
   if (input.hostName) {
     room.hostName = input.hostName;
@@ -152,6 +162,7 @@ app.get("/spotify/login", asyncRoute(async (req, res) => {
     scope: [
       "user-read-private",
       "user-top-read",
+      "ugc-image-upload",
       "playlist-modify-private",
       "playlist-modify-public",
     ].join(" "),
@@ -189,7 +200,7 @@ app.get("/spotify/callback", asyncRoute(async (req, res) => {
     const message = error instanceof Error ? error.message : "No se pudo completar la conexion con Spotify.";
     res.status(error instanceof ApiError ? error.status : 500).type("html").send(
       renderSpotifyCallbackPage({
-        body: `<p>${escapeHtml(message)}</p><p>Vuelve a kazp y prueba otra vez. Si estas usando Spotify en modo desarrollo, añade esta cuenta en Spotify Dashboard > Users and access.</p>`,
+        body: `<p>${escapeHtml(message)}</p><p>Vuelve a kazp y prueba otra vez. Si estas usando Spotify en modo desarrollo, anade esta cuenta en Spotify Dashboard > Users and access.</p>`,
         title: "Spotify no pudo conectar esta cuenta",
       }),
     );
@@ -239,7 +250,11 @@ app.post("/rooms/:code/playlist/save", asyncRoute(async (req, res) => {
     );
   }
 
-  const uris = unique(room.playlist.tracks.map((track) => track.uri).filter(Boolean));
+  const uris = unique(
+    room.playlist.tracks
+      .map((track) => track.uri)
+      .filter((uri) => typeof uri === "string" && uri.startsWith("spotify:track:")),
+  );
 
   if (uris.length === 0) {
     throw new ApiError(400, "La sesion no tiene canciones reales de Spotify para guardar.");
@@ -274,7 +289,7 @@ function asyncRoute(handler) {
   };
 }
 
-function createRoom(mode) {
+function createRoom(mode, roomName = "") {
   return {
     code: createRoomCode(),
     createdAt: new Date().toISOString(),
@@ -287,6 +302,7 @@ function createRoom(mode) {
     },
     members: [],
     mode,
+    name: roomName || "",
     playlist: emptyPlaylist(),
     scores: emptyScores(),
     summary: null,
@@ -319,6 +335,34 @@ function renderSpotifyCallbackPage({ body, title }) {
   `;
 }
 
+function loadSpotifyAccounts() {
+  try {
+    if (!fs.existsSync(spotifyAccountStorePath)) {
+      return new Map();
+    }
+
+    const raw = fs.readFileSync(spotifyAccountStorePath, "utf8");
+    const parsed = JSON.parse(raw);
+    return new Map(Array.isArray(parsed) ? parsed : []);
+  } catch (error) {
+    console.warn("No se pudo cargar el cache de Spotify:", error instanceof Error ? error.message : error);
+    return new Map();
+  }
+}
+
+function persistSpotifyAccounts() {
+  try {
+    fs.mkdirSync(dataDir, { recursive: true });
+    fs.writeFileSync(
+      spotifyAccountStorePath,
+      JSON.stringify([...spotifyAccounts.entries()], null, 2),
+      "utf8",
+    );
+  } catch (error) {
+    console.warn("No se pudo guardar el cache de Spotify:", error instanceof Error ? error.message : error);
+  }
+}
+
 function createRoomCode() {
   let code = "";
   do {
@@ -328,6 +372,7 @@ function createRoomCode() {
 }
 
 function createGuestMember({ appUserId, avatarUrl, displayName }) {
+  const savedSpotify = appUserId ? spotifyAccounts.get(appUserId) : null;
   const stats = {
     chaosScore: 0,
     decadeBias: "pendiente",
@@ -339,14 +384,14 @@ function createGuestMember({ appUserId, avatarUrl, displayName }) {
   };
 
   return {
-    accessToken: "",
+    accessToken: savedSpotify?.accessToken || "",
     appUserId,
-    avatarUrl,
+    avatarUrl: avatarUrl || savedSpotify?.avatarUrl || "",
     connectedAt: new Date().toISOString(),
-    displayName,
-    genres: [],
+    displayName: displayName || savedSpotify?.displayName || "Invitado",
+    genres: savedSpotify?.genres || [],
     id: `guest_${appUserId}`,
-    profile: {
+    profile: savedSpotify?.profile || {
       archetype: "Pendiente de conectar Spotify",
       badges: ["invitado en sala"],
       crimes: [],
@@ -354,13 +399,13 @@ function createGuestMember({ appUserId, avatarUrl, displayName }) {
       sneakySongs: [],
       strengths: ["ya puede unirse a la sala"],
     },
-    refreshToken: "",
-    spotifyUrl: "",
-    spotifyUserId: "",
-    stats,
-    tokenExpiresAt: 0,
-    topArtists: [],
-    topTracks: [],
+    refreshToken: savedSpotify?.refreshToken || "",
+    spotifyUrl: savedSpotify?.spotifyUrl || "",
+    spotifyUserId: savedSpotify?.spotifyUserId || "",
+    stats: savedSpotify?.stats || stats,
+    tokenExpiresAt: savedSpotify?.tokenExpiresAt || 0,
+    topArtists: savedSpotify?.topArtists || [],
+    topTracks: savedSpotify?.topTracks || [],
   };
 }
 
@@ -378,6 +423,7 @@ function publicRoom(room) {
   return {
     code: room.code,
     createdAt: room.createdAt,
+    name: room.name,
     live: room.live,
     members: room.members.map(({ accessToken, refreshToken, tokenExpiresAt, ...member }) => member),
     mode: room.mode,
@@ -446,6 +492,28 @@ function refreshRoomState(room) {
   room.live.energy = room.playlist.tracks.length > 0 ? room.scores.party : room.live.energy;
   room.live.currentTrack = room.playlist.tracks[0] || null;
   room.live.lastCommentary = fallbackLiveComment(room, "arranque");
+}
+
+function rememberSpotifyAccount(member) {
+  if (!member.appUserId || !member.spotifyUserId) {
+    return;
+  }
+
+  spotifyAccounts.set(member.appUserId, {
+    accessToken: member.accessToken,
+    avatarUrl: member.avatarUrl,
+    displayName: member.displayName,
+    genres: member.genres,
+    profile: member.profile,
+    refreshToken: member.refreshToken,
+    spotifyUrl: member.spotifyUrl,
+    spotifyUserId: member.spotifyUserId,
+    stats: member.stats,
+    tokenExpiresAt: member.tokenExpiresAt,
+    topArtists: member.topArtists,
+    topTracks: member.topTracks,
+  });
+  persistSpotifyAccounts();
 }
 
 async function applyAiAnalysis(room) {
@@ -813,6 +881,8 @@ async function createMemberFromSpotify(token, fallbackName, appUserId = "") {
     topTracks: normalizedTracks,
   };
 
+  rememberSpotifyAccount(member);
+
   return member;
 }
 
@@ -890,6 +960,7 @@ async function refreshSpotifyAccessToken(member) {
   member.accessToken = token.access_token;
   member.refreshToken = token.refresh_token || member.refreshToken;
   member.tokenExpiresAt = Date.now() + Number(token.expires_in || 3600) * 1000;
+  rememberSpotifyAccount(member);
 }
 
 async function spotifyMemberRequest(member, url, init = {}, retry = true) {
@@ -918,10 +989,10 @@ async function spotifyMemberRequest(member, url, init = {}, retry = true) {
 }
 
 async function createSpotifyPlaylist(member, room, uris) {
-  const playlistName = `Sala ${room.code}`;
+  const playlistName = room.name?.trim() || `Sala ${room.code}`;
   const response = await spotifyMemberRequest(member, "https://api.spotify.com/v1/me/playlists", {
     body: JSON.stringify({
-      description: `Playlist creada por kazp para la sala ${room.code}.`,
+      description: `Playlist creada por kazp para la sala ${room.name?.trim() || room.code}.`,
       name: playlistName,
       public: false,
     }),
@@ -945,15 +1016,52 @@ async function createSpotifyPlaylist(member, room, uris) {
         "Content-Type": "application/json",
       },
       method: "POST",
-      });
+    });
 
-      if (!addResponse.ok) {
+    if (!addResponse.ok) {
+      await throwSpotifyResponseError(
+        addResponse,
+        "Spotify ha rechazado algunas canciones al guardarlas en la playlist",
+      );
+    }
+  }
+
+  let totalTracks = await fetchPlaylistTrackCount(member, playlist.id);
+
+  if (totalTracks === 0 && uris.length > 0) {
+    for (let index = 0; index < uris.length; index += 100) {
+      const query = new URLSearchParams();
+      for (const uri of uris.slice(index, index + 100)) {
+        query.append("uris", uri);
+      }
+
+      const retryResponse = await spotifyMemberRequest(
+        member,
+        `https://api.spotify.com/v1/playlists/${playlist.id}/tracks?${query.toString()}`,
+        {
+          method: "POST",
+        },
+      );
+
+      if (!retryResponse.ok) {
         await throwSpotifyResponseError(
-          addResponse,
-          "Spotify ha rechazado algunas canciones al guardarlas en la playlist",
+          retryResponse,
+          "Spotify ha creado la playlist pero no ha aceptado las canciones",
         );
       }
     }
+
+    totalTracks = await fetchPlaylistTrackCount(member, playlist.id);
+  }
+
+  if (totalTracks === 0) {
+    throw new ApiError(
+      502,
+      "Spotify ha creado la playlist pero sigue vacia. Vuelve a generar la sesion con cuentas reales conectadas y prueba otra vez.",
+    );
+  }
+
+  await uploadPlaylistCover(member, playlist.id);
 
   return {
     playlistId: playlist.id,
@@ -961,6 +1069,44 @@ async function createSpotifyPlaylist(member, room, uris) {
     playlistUrl: playlist.external_urls?.spotify || "",
     trackCount: uris.length,
   };
+}
+
+async function fetchPlaylistTrackCount(member, playlistId) {
+  const verifyResponse = await spotifyMemberRequest(
+    member,
+    `https://api.spotify.com/v1/playlists/${playlistId}/tracks?limit=1`,
+  );
+
+  if (!verifyResponse.ok) {
+    await throwSpotifyResponseError(verifyResponse, "No se pudo verificar la playlist creada");
+  }
+
+  const verifyPayload = await verifyResponse.json();
+  return Number(verifyPayload.total || 0);
+}
+
+async function uploadPlaylistCover(member, playlistId) {
+  if (!fs.existsSync(playlistCoverPath)) {
+    return;
+  }
+
+  const image = fs.readFileSync(playlistCoverPath);
+  const base64Jpeg = image.toString("base64");
+  const response = await spotifyMemberRequest(
+    member,
+    `https://api.spotify.com/v1/playlists/${playlistId}/images`,
+    {
+      body: base64Jpeg,
+      headers: {
+        "Content-Type": "image/jpeg",
+      },
+      method: "PUT",
+    },
+  );
+
+  if (!response.ok && response.status !== 403) {
+    await throwSpotifyResponseError(response, "No se pudo subir la portada de la playlist");
+  }
 }
 
 function normalizeSpotifyTracks(items) {
@@ -1518,4 +1664,5 @@ const demoPresets = [
     ],
   },
 ];
+
 

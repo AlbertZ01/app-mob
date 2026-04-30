@@ -15,6 +15,19 @@ import {
 
 type Provider = "apple" | "google";
 
+const THEME = {
+  accent: "#A7E3BE",
+  accentSoft: "#173429",
+  background: "#07110D",
+  border: "#28483B",
+  input: "#0D1713",
+  muted: "#9CB8AD",
+  mutedSoft: "#6F8A7E",
+  panel: "#0F1D18",
+  panelSoft: "#142720",
+  text: "#F2FFF7",
+};
+
 export function AuthScreen({
   busy,
   canUseAuth,
@@ -80,7 +93,7 @@ export function AuthScreen({
 
   return (
     <SafeAreaView style={styles.safeArea}>
-      <LinearGradient colors={["#0D1321", "#1D7874"]} style={styles.header}>
+      <LinearGradient colors={["#07110D", "#163429", "#255847"]} style={styles.header}>
         <Text style={styles.title}>kazp</Text>
         <Text style={styles.subtitle}>
           Antes de entrar en la fiesta, cada persona necesita cuenta propia.
@@ -97,7 +110,7 @@ export function AuthScreen({
             keyboardType="email-address"
             onChangeText={setEmail}
             placeholder="correo@ejemplo.com"
-            placeholderTextColor="#6C7774"
+            placeholderTextColor={THEME.mutedSoft}
             style={styles.input}
             value={email}
           />
@@ -106,7 +119,7 @@ export function AuthScreen({
             autoComplete="password"
             onChangeText={setPassword}
             placeholder="Contrasena"
-            placeholderTextColor="#6C7774"
+            placeholderTextColor={THEME.mutedSoft}
             secureTextEntry
             style={styles.input}
             value={password}
@@ -198,12 +211,12 @@ function ButtonRow({
       ]}
     >
       {loading ? (
-        <ActivityIndicator color={variant === "dark" ? "#F8F4E3" : "#0D1321"} />
+        <ActivityIndicator color={variant === "dark" ? THEME.text : THEME.background} />
       ) : (
         <>
           {icon ? (
             <Ionicons
-              color={variant === "dark" ? "#F8F4E3" : "#0D1321"}
+              color={variant === "dark" ? THEME.text : THEME.background}
               name={icon}
               size={18}
             />
@@ -220,7 +233,7 @@ function ButtonRow({
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: "#0D1321",
+    backgroundColor: THEME.background,
   },
   header: {
     paddingHorizontal: 20,
@@ -228,12 +241,12 @@ const styles = StyleSheet.create({
     paddingBottom: 24,
   },
   title: {
-    color: "#FFFFFF",
+    color: THEME.text,
     fontSize: 32,
     fontWeight: "900",
   },
   subtitle: {
-    color: "#D8E3E0",
+    color: THEME.muted,
     fontSize: 15,
     lineHeight: 22,
     marginTop: 10,
@@ -244,28 +257,30 @@ const styles = StyleSheet.create({
     paddingBottom: 34,
   },
   card: {
-    backgroundColor: "#FFFFFF",
-    borderRadius: 8,
+    backgroundColor: THEME.panel,
+    borderColor: THEME.border,
+    borderRadius: 18,
+    borderWidth: 1,
     padding: 18,
   },
   cardTitle: {
-    color: "#0D1321",
+    color: THEME.text,
     fontSize: 22,
     fontWeight: "900",
     marginBottom: 14,
   },
   metaText: {
-    color: "#596663",
+    color: THEME.muted,
     fontSize: 13,
     lineHeight: 18,
     marginBottom: 12,
   },
   input: {
-    backgroundColor: "#F8F4E3",
-    borderColor: "#E3DED0",
-    borderRadius: 8,
+    backgroundColor: THEME.input,
+    borderColor: THEME.border,
+    borderRadius: 14,
     borderWidth: 1,
-    color: "#0D1321",
+    color: THEME.text,
     fontSize: 16,
     height: 50,
     marginBottom: 12,
@@ -279,7 +294,7 @@ const styles = StyleSheet.create({
     marginBottom: 10,
   },
   feedbackHint: {
-    color: "#6C7774",
+    color: THEME.mutedSoft,
     fontSize: 12,
     fontWeight: "700",
     lineHeight: 18,
@@ -287,8 +302,8 @@ const styles = StyleSheet.create({
   },
   button: {
     alignItems: "center",
-    backgroundColor: "#D9B44A",
-    borderRadius: 8,
+    backgroundColor: THEME.accent,
+    borderRadius: 14,
     flexDirection: "row",
     gap: 8,
     height: 48,
@@ -296,11 +311,11 @@ const styles = StyleSheet.create({
     marginBottom: 10,
   },
   buttonDark: {
-    backgroundColor: "#0D1321",
+    backgroundColor: THEME.accentSoft,
   },
   buttonGhost: {
-    backgroundColor: "#FFFFFF",
-    borderColor: "#E3DED0",
+    backgroundColor: THEME.panelSoft,
+    borderColor: THEME.border,
     borderWidth: 1,
   },
   buttonDisabled: {
@@ -310,12 +325,12 @@ const styles = StyleSheet.create({
     transform: [{ scale: 0.99 }],
   },
   buttonText: {
-    color: "#0D1321",
+    color: THEME.background,
     fontSize: 15,
     fontWeight: "900",
   },
   buttonTextDark: {
-    color: "#F8F4E3",
+    color: THEME.text,
   },
   separatorRow: {
     alignItems: "center",
@@ -324,12 +339,12 @@ const styles = StyleSheet.create({
     marginVertical: 12,
   },
   separatorLine: {
-    backgroundColor: "#E3DED0",
+    backgroundColor: THEME.border,
     flex: 1,
     height: 1,
   },
   separatorLabel: {
-    color: "#6C7774",
+    color: THEME.mutedSoft,
     fontSize: 12,
     fontWeight: "800",
     textTransform: "uppercase",
