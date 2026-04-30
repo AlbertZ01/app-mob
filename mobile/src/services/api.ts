@@ -57,6 +57,34 @@ export function createRoom(mode: PartyMode, hostName: string): Promise<PartyRoom
   });
 }
 
+export function createRoomWithProfile(
+  mode: PartyMode,
+  hostName: string,
+  appUserId: string,
+  avatarUrl?: string,
+): Promise<PartyRoom> {
+  return request<PartyRoom>("/rooms", {
+    method: "POST",
+    body: JSON.stringify({ appUserId, avatarUrl: avatarUrl || "", mode, hostName }),
+  });
+}
+
+export function joinRoom(
+  code: string,
+  appUserId: string,
+  displayName: string,
+  avatarUrl?: string,
+): Promise<PartyRoom> {
+  return request<PartyRoom>(`/rooms/${code.toUpperCase()}/join`, {
+    method: "POST",
+    body: JSON.stringify({
+      appUserId,
+      avatarUrl: avatarUrl || "",
+      displayName,
+    }),
+  });
+}
+
 export function getRoom(code: string): Promise<PartyRoom> {
   return request<PartyRoom>(`/rooms/${code.toUpperCase()}`);
 }

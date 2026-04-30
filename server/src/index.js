@@ -25,8 +25,16 @@ const partyModes = [
 ];
 
 const createRoomSchema = z.object({
+  appUserId: z.string().trim().min(1).max(120).optional(),
+  avatarUrl: z.string().trim().max(400).optional(),
   hostName: z.string().trim().min(1).max(40).optional(),
   mode: z.enum(partyModes).default("previa"),
+});
+
+const joinRoomSchema = z.object({
+  appUserId: z.string().trim().min(1).max(120),
+  avatarUrl: z.string().trim().max(400).optional(),
+  displayName: z.string().trim().min(1).max(40),
 });
 
 const demoFriendSchema = z.object({
@@ -67,12 +75,41 @@ app.post("/rooms", asyncRoute(async (req, res) => {
     room.hostName = input.hostName;
   }
 
+  if (input.appUserId && input.hostName) {
+    upsertMember(
+      room,
+      createGuestMember({
+        appUserId: input.appUserId,
+        avatarUrl: input.avatarUrl || "",
+        displayName: input.hostName,
+      }),
+    );
+    refreshRoomState(room);
+  }
+
   rooms.set(room.code, room);
   res.status(201).json(publicRoom(room));
 }));
 
 app.get("/rooms/:code", asyncRoute(async (req, res) => {
   res.json(publicRoom(getRoomOrThrow(req.params.code)));
+}));
+
+app.post("/rooms/:code/join", asyncRoute(async (req, res) => {
+  const room = getRoomOrThrow(req.params.code);
+  const input = joinRoomSchema.parse(req.body);
+
+  upsertMember(
+    room,
+    createGuestMember({
+      appUserId: input.appUserId,
+      avatarUrl: input.avatarUrl || "",
+      displayName: input.displayName,
+    }),
+  );
+  refreshRoomState(room);
+
+  res.json(publicRoom(room));
 }));
 
 app.post("/rooms/:code/demo-friend", asyncRoute(async (req, res) => {
@@ -136,36 +173,27 @@ app.get("/spotify/callback", asyncRoute(async (req, res) => {
 
   authStates.delete(state);
 
-  const room = getRoomOrThrow(authState.roomCode);
-  const token = await exchangeSpotifyCode(code, authState.codeVerifier);
-  const member = await createMemberFromSpotify(token, authState.displayName, authState.appUserId);
+  try {
+    const room = getRoomOrThrow(authState.roomCode);
+    const token = await exchangeSpotifyCode(code, authState.codeVerifier);
+    const member = await createMemberFromSpotify(token, authState.displayName, authState.appUserId);
 
-  upsertMember(room, member);
-  refreshRoomState(room);
+    upsertMember(room, member);
+    refreshRoomState(room);
 
-  res.type("html").send(`
-    <!doctype html>
-    <html lang="es">
-      <head>
-        <meta charset="utf-8" />
-        <meta name="viewport" content="width=device-width, initial-scale=1" />
-        <title>AUX Roast conectado</title>
-        <style>
-          body { background:#0D1321; color:#F8F4E3; font-family:system-ui,sans-serif; margin:0; padding:32px; }
-          main { margin:auto; max-width:520px; }
-          h1 { color:#D9B44A; }
-          strong { color:#EE4266; }
-        </style>
-      </head>
-      <body>
-        <main>
-          <h1>Spotify conectado</h1>
-          <p><strong>${escapeHtml(member.displayName)}</strong> ya esta en la sala ${room.code}.</p>
-          <p>Vuelve a la app y pulsa refrescar sala.</p>
-        </main>
-      </body>
-    </html>
-  `);
+    res.type("html").send(renderSpotifyCallbackPage({
+      body: `<p><strong>${escapeHtml(member.displayName)}</strong> ya esta en la sala ${room.code}.</p><p>Vuelve a la app y pulsa refrescar sala.</p>`,
+      title: "Spotify conectado",
+    }));
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "No se pudo completar la conexion con Spotify.";
+    res.status(error instanceof ApiError ? error.status : 500).type("html").send(
+      renderSpotifyCallbackPage({
+        body: `<p>${escapeHtml(message)}</p><p>Vuelve a kazp y prueba otra vez. Si estas usando Spotify en modo desarrollo, añade esta cuenta en Spotify Dashboard > Users and access.</p>`,
+        title: "Spotify no pudo conectar esta cuenta",
+      }),
+    );
+  }
 }));
 
 app.post("/rooms/:code/analyze", asyncRoute(async (req, res) => {
@@ -265,12 +293,75 @@ function createRoom(mode) {
   };
 }
 
+function renderSpotifyCallbackPage({ body, title }) {
+  return `
+    <!doctype html>
+    <html lang="es">
+      <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>${escapeHtml(title)}</title>
+        <style>
+          body { background:#0D1321; color:#F8F4E3; font-family:system-ui,sans-serif; margin:0; padding:32px; }
+          main { margin:auto; max-width:520px; }
+          h1 { color:#D9B44A; }
+          strong { color:#EE4266; }
+          p { line-height:1.6; }
+        </style>
+      </head>
+      <body>
+        <main>
+          <h1>${escapeHtml(title)}</h1>
+          ${body}
+        </main>
+      </body>
+    </html>
+  `;
+}
+
 function createRoomCode() {
   let code = "";
   do {
     code = crypto.randomBytes(4).toString("hex").slice(0, 6).toUpperCase();
   } while (rooms.has(code));
   return code;
+}
+
+function createGuestMember({ appUserId, avatarUrl, displayName }) {
+  const stats = {
+    chaosScore: 0,
+    decadeBias: "pendiente",
+    gymScore: 0,
+    mainGenres: [],
+    partyScore: 0,
+    repeatRisk: 0,
+    sadScore: 0,
+  };
+
+  return {
+    accessToken: "",
+    appUserId,
+    avatarUrl,
+    connectedAt: new Date().toISOString(),
+    displayName,
+    genres: [],
+    id: `guest_${appUserId}`,
+    profile: {
+      archetype: "Pendiente de conectar Spotify",
+      badges: ["invitado en sala"],
+      crimes: [],
+      roast: `${displayName} ya esta en la sala. Falta conectar Spotify para que kazp pueda leer su gusto musical.`,
+      sneakySongs: [],
+      strengths: ["ya puede unirse a la sala"],
+    },
+    refreshToken: "",
+    spotifyUrl: "",
+    spotifyUserId: "",
+    stats,
+    tokenExpiresAt: 0,
+    topArtists: [],
+    topTracks: [],
+  };
 }
 
 function getRoomOrThrow(code) {
@@ -327,10 +418,23 @@ function defaultPhases() {
 }
 
 function upsertMember(room, member) {
-  const index = room.members.findIndex((candidate) => candidate.spotifyUserId === member.spotifyUserId);
+  const index = room.members.findIndex((candidate) => {
+    if (member.spotifyUserId && candidate.spotifyUserId === member.spotifyUserId) {
+      return true;
+    }
+
+    if (member.appUserId && candidate.appUserId === member.appUserId) {
+      return true;
+    }
+
+    return false;
+  });
 
   if (index >= 0) {
-    room.members[index] = member;
+    room.members[index] = {
+      ...room.members[index],
+      ...member,
+    };
   } else {
     room.members.push(member);
   }

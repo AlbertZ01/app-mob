@@ -26,11 +26,12 @@ import {
 import { SafeAreaProvider, useSafeAreaInsets } from "react-native-safe-area-context";
 
 import {
-  createRoom,
+  createRoomWithProfile,
   finishParty,
   generateSession,
   getRoom,
   getSpotifyLoginUrl,
+  joinRoom,
   savePlaylist,
   sendLiveVote,
 } from "./src/services/api";
@@ -46,6 +47,7 @@ type IconName = ComponentProps<typeof Ionicons>["name"];
 type TabKey = "sala" | "perfiles" | "sesion" | "live" | "resumen" | "perfil";
 type AuthProvider = "apple" | "google";
 type AuthenticatedUser = {
+  avatarUrl: string;
   id: string;
   displayName: string;
   email: string;
@@ -114,6 +116,7 @@ export default function App() {
   const [authBusy, setAuthBusy] = useState("");
   const [authReady, setAuthReady] = useState(false);
   const [isUpdateAvailable, setIsUpdateAvailable] = useState(false);
+  const [pendingInviteCode, setPendingInviteCode] = useState("");
   const [session, setSession] = useState<Session | null>(null);
   const [updateError, setUpdateError] = useState("");
   const [updateState, setUpdateState] = useState<UpdateState>("idle");
@@ -238,6 +241,13 @@ export default function App() {
 
   useEffect(() => {
     const handleUrl = ({ url }: { url: string }) => {
+      const inviteCode = inviteCodeFromUrl(url);
+
+      if (inviteCode) {
+        setPendingInviteCode(inviteCode);
+        return;
+      }
+
       void createSessionFromUrl(url).catch((error) => {
         Alert.alert("Login", mapAuthError(error));
       });
@@ -387,8 +397,32 @@ export default function App() {
         authenticatedUser={sessionToUser(session)}
         isUpdateAvailable={isUpdateAvailable}
         onCheckUpdates={checkForUpdates}
+        onConsumeInvite={() => setPendingInviteCode("")}
+        pendingInviteCode={pendingInviteCode}
+        onProfileUpdated={async (displayName, avatarUrl) => {
+          await runAuth("profile", async () => {
+            if (!supabase) {
+              throw new Error("Falta configurar Supabase en la build instalada.");
+            }
+
+            const { error } = await supabase.auth.updateUser({
+              data: {
+                avatar_url: avatarUrl,
+                display_name: displayName,
+              },
+            });
+
+            if (error) {
+              throw error;
+            }
+
+            const { data } = await supabase.auth.getSession();
+            setSession(data.session);
+          });
+        }}
         onSignOut={handleSignOut}
         onUpdatePress={handleApplyUpdate}
+        profileBusy={authBusy === "profile"}
         signingOut={authBusy === "signout"}
         updateError={updateError}
         updateState={updateState}
@@ -401,8 +435,12 @@ function PartyExperience({
   authenticatedUser,
   isUpdateAvailable,
   onCheckUpdates,
+  onConsumeInvite,
+  onProfileUpdated,
   onSignOut,
   onUpdatePress,
+  pendingInviteCode,
+  profileBusy,
   signingOut,
   updateError,
   updateState,
@@ -410,8 +448,12 @@ function PartyExperience({
   authenticatedUser: AuthenticatedUser;
   isUpdateAvailable: boolean;
   onCheckUpdates: () => Promise<void>;
+  onConsumeInvite: () => void;
+  onProfileUpdated: (displayName: string, avatarUrl: string) => Promise<void>;
   onSignOut: () => Promise<void>;
   onUpdatePress: () => Promise<void>;
+  pendingInviteCode: string;
+  profileBusy: boolean;
   signingOut: boolean;
   updateError: string;
   updateState: UpdateState;
@@ -419,18 +461,29 @@ function PartyExperience({
   const insets = useSafeAreaInsets();
   const [room, setRoom] = useState<PartyRoom | null>(null);
   const [activeTab, setActiveTab] = useState<TabKey>("sala");
+  const [homeTab, setHomeTab] = useState<"inicio" | "perfil">("inicio");
   const [selectedMode, setSelectedMode] = useState<PartyMode>("previa");
   const [displayName, setDisplayName] = useState(authenticatedUser.displayName);
+  const [profileName, setProfileName] = useState(authenticatedUser.displayName);
+  const [profilePhotoUrl, setProfilePhotoUrl] = useState(authenticatedUser.avatarUrl);
   const [joinCode, setJoinCode] = useState("");
   const [busyLabel, setBusyLabel] = useState("");
 
   const memberCount = room?.members.length || 0;
-  const canUsePartyTools = memberCount > 0 && !busyLabel;
+  const spotifyReadyCount = room?.members.filter((member) => Boolean(member.spotifyUrl)).length || 0;
+  const canUsePartyTools = spotifyReadyCount > 0 && !busyLabel;
   const currentMember = room ? findMatchingMember(room.members, authenticatedUser) : null;
+  const currentMemberHasSpotify = Boolean(currentMember?.spotifyUrl);
 
   useEffect(() => {
     setDisplayName(authenticatedUser.displayName);
+    setProfileName(authenticatedUser.displayName);
+    setProfilePhotoUrl(authenticatedUser.avatarUrl);
   }, [authenticatedUser.displayName]);
+
+  useEffect(() => {
+    setProfilePhotoUrl(authenticatedUser.avatarUrl);
+  }, [authenticatedUser.avatarUrl]);
 
   useEffect(() => {
     if (!room?.code) {
@@ -446,6 +499,45 @@ function PartyExperience({
     return () => clearInterval(timer);
   }, [room?.code]);
 
+  useEffect(() => {
+    if (!pendingInviteCode || room || busyLabel) {
+      return;
+    }
+
+    void (async () => {
+      try {
+        setBusyLabel("Aceptando invitacion");
+        const nextRoom = await joinRoom(
+          pendingInviteCode,
+          authenticatedUser.id,
+          profileName.trim() || authenticatedUser.displayName,
+          profilePhotoUrl,
+        );
+        setRoom(nextRoom);
+        setJoinCode(pendingInviteCode);
+        setActiveTab("sala");
+        onConsumeInvite();
+      } catch (error) {
+        Alert.alert(
+          "Invitacion",
+          error instanceof Error ? error.message : "No se pudo abrir la invitacion.",
+        );
+        onConsumeInvite();
+      } finally {
+        setBusyLabel("");
+      }
+    })();
+  }, [
+    authenticatedUser.displayName,
+    authenticatedUser.id,
+    busyLabel,
+    onConsumeInvite,
+    pendingInviteCode,
+    profileName,
+    profilePhotoUrl,
+    room,
+  ]);
+
   async function run(label: string, action: () => Promise<void>) {
     setBusyLabel(label);
     try {
@@ -460,7 +552,12 @@ function PartyExperience({
 
   async function handleCreateRoom() {
     await run("Creando sala", async () => {
-      const nextRoom = await createRoom(selectedMode, displayName);
+      const nextRoom = await createRoomWithProfile(
+        selectedMode,
+        profileName.trim() || displayName,
+        authenticatedUser.id,
+        profilePhotoUrl,
+      );
       setRoom(nextRoom);
       setActiveTab("sala");
     });
@@ -475,7 +572,12 @@ function PartyExperience({
     }
 
     await run("Entrando", async () => {
-      const nextRoom = await getRoom(code);
+      const nextRoom = await joinRoom(
+        code,
+        authenticatedUser.id,
+        profileName.trim() || authenticatedUser.displayName,
+        profilePhotoUrl,
+      );
       setRoom(nextRoom);
       setActiveTab("sala");
     });
@@ -487,7 +589,11 @@ function PartyExperience({
     }
 
     await run("Abriendo Spotify", async () => {
-      const login = await getSpotifyLoginUrl(room.code, displayName, authenticatedUser.id);
+      const login = await getSpotifyLoginUrl(
+        room.code,
+        profileName.trim() || displayName,
+        authenticatedUser.id,
+      );
       await NativeLinking.openURL(login.url);
       Alert.alert(
         "Spotify abierto",
@@ -512,8 +618,9 @@ function PartyExperience({
     }
 
     await Share.share({
-      message: `Unete a mi sala ${room.code} en kazp. Entra en la app, inicia sesion y usa este codigo para conectar tu Spotify: ${room.code}`,
+      message: `Unete a mi sala ${room.code} en kazp.\n\nAbre este enlace en el movil donde tengas la app instalada:\nappmob://join?roomCode=${room.code}\n\nSi tu app no se abre sola, entra manualmente con el codigo ${room.code}.`,
       title: `Invitacion a la sala ${room.code}`,
+      url: `appmob://join?roomCode=${room.code}`,
     });
   }
 
@@ -558,7 +665,7 @@ function PartyExperience({
       return;
     }
 
-    if (!currentMember) {
+    if (!currentMemberHasSpotify) {
       Alert.alert(
         "Conecta tu Spotify",
         "La playlist se guarda en tu propia cuenta. Primero conecta Spotify con esta misma sesion.",
@@ -567,7 +674,7 @@ function PartyExperience({
     }
 
     await run("Guardando playlist", async () => {
-      const saved = await savePlaylist(room.code, currentMember.id);
+      const saved = await savePlaylist(room.code, currentMember?.id);
       const nextRoom = await getRoom(room.code);
       setRoom(nextRoom);
       Alert.alert(
@@ -686,8 +793,22 @@ function PartyExperience({
                   isUpdateAvailable={isUpdateAvailable}
                   onCheckUpdates={onCheckUpdates}
                   onConnectSpotify={handleConnectSpotify}
+                  onProfileSave={() =>
+                    void onProfileUpdated(
+                      profileName.trim() || authenticatedUser.displayName,
+                      profilePhotoUrl.trim(),
+                    )
+                  }
                   onUpdatePress={onUpdatePress}
+                  profileBusy={profileBusy}
+                  profileName={profileName}
+                  profilePhotoUrl={profilePhotoUrl}
                   room={room}
+                  setProfileName={(value) => {
+                    setProfileName(value);
+                    setDisplayName(value);
+                  }}
+                  setProfilePhotoUrl={setProfilePhotoUrl}
                   updateError={updateError}
                   updateState={updateState}
                 />
@@ -696,16 +817,49 @@ function PartyExperience({
           </>
         ) : (
           <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-            <HomeScreen
-              authenticatedUser={authenticatedUser}
-              busyLabel={busyLabel}
-              displayName={displayName}
-              joinCode={joinCode}
-              onCreateRoom={handleCreateRoom}
-              onJoinRoom={handleJoinRoom}
-              setDisplayName={setDisplayName}
-              setJoinCode={setJoinCode}
-            />
+            <View style={styles.homeTabRow}>
+              <Pressable
+                onPress={() => setHomeTab("inicio")}
+                style={[styles.homeTabButton, homeTab === "inicio" && styles.homeTabButtonActive]}
+              >
+                <Text style={[styles.homeTabText, homeTab === "inicio" && styles.homeTabTextActive]}>
+                  Inicio
+                </Text>
+              </Pressable>
+              <Pressable
+                onPress={() => setHomeTab("perfil")}
+                style={[styles.homeTabButton, homeTab === "perfil" && styles.homeTabButtonActive]}
+              >
+                <Text style={[styles.homeTabText, homeTab === "perfil" && styles.homeTabTextActive]}>
+                  Perfil
+                </Text>
+              </Pressable>
+            </View>
+            {homeTab === "inicio" ? (
+              <HomeScreen
+                authenticatedUser={authenticatedUser}
+                busyLabel={busyLabel}
+                displayName={displayName}
+                joinCode={joinCode}
+                onCreateRoom={handleCreateRoom}
+                onJoinRoom={handleJoinRoom}
+                setDisplayName={setDisplayName}
+                setJoinCode={setJoinCode}
+              />
+            ) : (
+              <ProfileSetupScreen
+                authenticatedUser={authenticatedUser}
+                busy={profileBusy}
+                displayName={profileName}
+                photoUrl={profilePhotoUrl}
+                onSave={() => void onProfileUpdated(profileName.trim() || authenticatedUser.displayName, profilePhotoUrl.trim())}
+                setDisplayName={(value) => {
+                  setProfileName(value);
+                  setDisplayName(value);
+                }}
+                setPhotoUrl={setProfilePhotoUrl}
+              />
+            )}
           </ScrollView>
         )}
       </KeyboardAvoidingView>
@@ -721,10 +875,32 @@ function sessionToUser(session: Session): AuthenticatedUser {
     "party friend";
 
   return {
+    avatarUrl:
+      session.user.user_metadata?.avatar_url ||
+      session.user.user_metadata?.picture ||
+      "",
     id: session.user.id,
     displayName,
     email: session.user.email || "usuario sin correo",
   };
+}
+
+function inviteCodeFromUrl(url: string) {
+  try {
+    const parsed = new URL(url);
+
+    if (parsed.protocol !== "appmob:") {
+      return "";
+    }
+
+    if (parsed.hostname !== "join") {
+      return "";
+    }
+
+    return parsed.searchParams.get("roomCode")?.trim().toUpperCase() || "";
+  } catch {
+    return "";
+  }
 }
 
 function findMatchingMember(members: PartyMember[], authenticatedUser: AuthenticatedUser) {
@@ -894,7 +1070,7 @@ function RoomScreen({
   onRefresh: () => void;
   room: PartyRoom;
 }) {
-  const isSpotifyReady = Boolean(currentMember);
+  const isSpotifyReady = Boolean(currentMember?.spotifyUrl);
 
   return (
     <>
@@ -1236,8 +1412,14 @@ function ProfileScreen({
   isUpdateAvailable,
   onCheckUpdates,
   onConnectSpotify,
+  onProfileSave,
   onUpdatePress,
+  profileBusy,
+  profileName,
+  profilePhotoUrl,
   room,
+  setProfileName,
+  setProfilePhotoUrl,
   updateError,
   updateState,
 }: {
@@ -1246,12 +1428,19 @@ function ProfileScreen({
   isUpdateAvailable: boolean;
   onCheckUpdates: () => Promise<void>;
   onConnectSpotify: () => Promise<void>;
+  onProfileSave: () => void;
   onUpdatePress: () => Promise<void>;
+  profileBusy: boolean;
+  profileName: string;
+  profilePhotoUrl: string;
   room: PartyRoom;
+  setProfileName: (value: string) => void;
+  setProfilePhotoUrl: (value: string) => void;
   updateError: string;
   updateState: UpdateState;
 }) {
   const updateBusy = updateState === "checking" || updateState === "downloading";
+  const hasSpotifyProfile = Boolean(currentMember?.spotifyUrl);
   const updateSummary = updateError
     ? updateError
     : updateBusy
@@ -1264,14 +1453,16 @@ function ProfileScreen({
     <>
       <LinearGradient colors={["#0D1321", "#1D7874"]} style={styles.profileHero}>
         <View style={styles.profileHeroTop}>
-          <View style={styles.profileAvatar}>
-            <Text style={styles.profileAvatarText}>{initialsFor(authenticatedUser.displayName)}</Text>
-          </View>
+          <IdentityAvatar
+            avatarUrl={profilePhotoUrl || authenticatedUser.avatarUrl}
+            name={profileName || authenticatedUser.displayName}
+            size={64}
+          />
           <View style={styles.profileHeroCopy}>
-            <Text style={styles.profileHeroName}>{authenticatedUser.displayName}</Text>
+            <Text style={styles.profileHeroName}>{profileName || authenticatedUser.displayName}</Text>
             <Text style={styles.profileHeroMeta}>
-              {currentMember
-                ? `${currentMember.profile.archetype} listo para guardar playlists en tu cuenta`
+              {hasSpotifyProfile
+                ? `${currentMember?.profile.archetype || "Spotify listo"} listo para guardar playlists en tu cuenta`
                 : "Conecta tu cuenta de Spotify para completar tu perfil y guardar la sesion final"}
             </Text>
           </View>
@@ -1286,16 +1477,16 @@ function ProfileScreen({
             <Text style={styles.profilePillText}>{room.members.length} conectados</Text>
           </View>
           <View style={styles.profilePill}>
-            <Ionicons color="#D9B44A" name={currentMember ? "musical-notes-outline" : "radio-outline"} size={14} />
-            <Text style={styles.profilePillText}>{currentMember ? "Spotify listo" : "Spotify pendiente"}</Text>
+            <Ionicons color="#D9B44A" name={hasSpotifyProfile ? "musical-notes-outline" : "radio-outline"} size={14} />
+            <Text style={styles.profilePillText}>{hasSpotifyProfile ? "Spotify listo" : "Spotify pendiente"}</Text>
           </View>
         </View>
       </LinearGradient>
 
       <View style={styles.statsGrid}>
-        <Metric hot label="Fiesta" value={currentMember ? `${currentMember.stats.partyScore}%` : "--"} />
-        <Metric label="Caos" value={currentMember ? `${currentMember.stats.chaosScore}%` : `${room.scores.chaos}%`} />
-        <Metric label="Repeticion" value={currentMember ? `${currentMember.stats.repeatRisk}%` : "--"} />
+        <Metric hot label="Fiesta" value={hasSpotifyProfile ? `${currentMember?.stats.partyScore}%` : "--"} />
+        <Metric label="Caos" value={hasSpotifyProfile ? `${currentMember?.stats.chaosScore}%` : `${room.scores.chaos}%`} />
+        <Metric label="Repeticion" value={hasSpotifyProfile ? `${currentMember?.stats.repeatRisk}%` : "--"} />
       </View>
 
       <View style={styles.panel}>
@@ -1309,9 +1500,9 @@ function ProfileScreen({
           </View>
           <View style={styles.stageCard}>
             <Text style={styles.stageNumber}>Spotify</Text>
-            <Text style={styles.stageTitle}>{currentMember ? "Conectado" : "Pendiente"}</Text>
+            <Text style={styles.stageTitle}>{hasSpotifyProfile ? "Conectado" : "Pendiente"}</Text>
             <Text style={styles.stageText}>
-              {currentMember
+              {hasSpotifyProfile
                 ? "Tu biblioteca ya puede recibir la playlist final."
                 : "Conecta tu cuenta para guardar la sesion en tu perfil."}
             </Text>
@@ -1344,9 +1535,19 @@ function ProfileScreen({
         </View>
       </View>
 
+      <ProfileSetupScreen
+        authenticatedUser={authenticatedUser}
+        busy={profileBusy}
+        displayName={profileName}
+        photoUrl={profilePhotoUrl}
+        onSave={onProfileSave}
+        setDisplayName={setProfileName}
+        setPhotoUrl={setProfilePhotoUrl}
+      />
+
       <View style={styles.panel}>
         <Text style={styles.panelTitle}>Mi perfil musical</Text>
-        {currentMember ? (
+        {hasSpotifyProfile && currentMember ? (
           <>
             <View style={styles.profileMemberRow}>
               <Avatar member={currentMember} size={58} />
@@ -1391,6 +1592,66 @@ function ProfileScreen({
         )}
       </View>
     </>
+  );
+}
+
+function ProfileSetupScreen({
+  authenticatedUser,
+  busy,
+  displayName,
+  onSave,
+  photoUrl,
+  setDisplayName,
+  setPhotoUrl,
+}: {
+  authenticatedUser: AuthenticatedUser;
+  busy: boolean;
+  displayName: string;
+  onSave: () => void;
+  photoUrl: string;
+  setDisplayName: (value: string) => void;
+  setPhotoUrl: (value: string) => void;
+}) {
+  return (
+    <View style={styles.panel}>
+      <Text style={styles.panelTitle}>Tu perfil</Text>
+      <Text style={styles.bodyText}>
+        Ajusta tu alias y tu foto antes de entrar en una sala. Asi tus amigos te veran bien al unirse.
+      </Text>
+      <View style={styles.profileEditorRow}>
+        <IdentityAvatar
+          avatarUrl={photoUrl || authenticatedUser.avatarUrl}
+          name={displayName || authenticatedUser.displayName}
+          size={64}
+        />
+        <View style={styles.profileEditorCopy}>
+          <Text style={styles.profileEditorName}>{displayName || authenticatedUser.displayName}</Text>
+          <Text style={styles.profileEditorHint}>Tu cuenta se usa para unirte a salas e invitaciones.</Text>
+        </View>
+      </View>
+      <TextInput
+        onChangeText={setDisplayName}
+        placeholder="Tu alias en kazp"
+        placeholderTextColor="#7A8582"
+        style={styles.input}
+        value={displayName}
+      />
+      <TextInput
+        autoCapitalize="none"
+        onChangeText={setPhotoUrl}
+        placeholder="URL de tu foto"
+        placeholderTextColor="#7A8582"
+        style={styles.input}
+        value={photoUrl}
+      />
+      <AppButton
+        icon="save"
+        label="Guardar perfil"
+        loading={busy}
+        onPress={onSave}
+        variant="dark"
+      />
+    </View>
   );
 }
 
@@ -1619,16 +1880,20 @@ function Metric({ hot, label, value }: { hot?: boolean; label: string; value: st
   );
 }
 
-function Avatar({ member, size }: { member: PartyMember; size: number }) {
-  if (member.avatarUrl) {
-    return <Image source={{ uri: member.avatarUrl }} style={{ borderRadius: size / 2, height: size, width: size }} />;
+function IdentityAvatar({ avatarUrl, name, size }: { avatarUrl: string; name: string; size: number }) {
+  if (avatarUrl) {
+    return <Image source={{ uri: avatarUrl }} style={{ borderRadius: size / 2, height: size, width: size }} />;
   }
 
   return (
     <View style={[styles.avatarFallback, { borderRadius: size / 2, height: size, width: size }]}>
-      <Text style={styles.avatarInitial}>{member.displayName.slice(0, 1).toUpperCase()}</Text>
+      <Text style={styles.avatarInitial}>{name.slice(0, 1).toUpperCase()}</Text>
     </View>
   );
+}
+
+function Avatar({ member, size }: { member: PartyMember; size: number }) {
+  return <IdentityAvatar avatarUrl={member.avatarUrl} name={member.displayName} size={size} />;
 }
 
 function TagSection({ color, items, title }: { color: string; items: string[]; title: string }) {
@@ -1744,6 +2009,34 @@ const styles = StyleSheet.create({
     color: "#FFFFFF",
     fontSize: 12,
     fontWeight: "800",
+  },
+  homeTabRow: {
+    backgroundColor: "#FFFFFF",
+    borderColor: "#E3DED0",
+    borderRadius: 999,
+    borderWidth: 1,
+    flexDirection: "row",
+    gap: 8,
+    marginBottom: 14,
+    padding: 6,
+  },
+  homeTabButton: {
+    alignItems: "center",
+    borderRadius: 999,
+    flex: 1,
+    justifyContent: "center",
+    minHeight: 40,
+  },
+  homeTabButtonActive: {
+    backgroundColor: "#10211E",
+  },
+  homeTabText: {
+    color: "#596663",
+    fontSize: 14,
+    fontWeight: "900",
+  },
+  homeTabTextActive: {
+    color: "#FFFFFF",
   },
   appName: {
     color: "#FFFFFF",
@@ -1864,6 +2157,26 @@ const styles = StyleSheet.create({
     color: "#FFFFFF",
     fontSize: 12,
     fontWeight: "800",
+  },
+  profileEditorRow: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: 12,
+    marginBottom: 14,
+  },
+  profileEditorCopy: {
+    flex: 1,
+  },
+  profileEditorName: {
+    color: "#0D1321",
+    fontSize: 18,
+    fontWeight: "900",
+  },
+  profileEditorHint: {
+    color: "#596663",
+    fontSize: 13,
+    lineHeight: 18,
+    marginTop: 4,
   },
   title: {
     color: "#FFFFFF",
